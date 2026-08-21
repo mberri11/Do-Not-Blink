@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Hand-converted from design/brand/do-not-blink.svg (viewBox 0 0 512 512).
+
+  VectorDrawable has no feGaussianBlur, so each blurred duplicate in the SVG becomes a wider,
+  lower-alpha stroke of the same path — the same trick the game canvas uses. The group scales the
+  512-unit artwork to 66% so it sits inside the adaptive-icon safe zone.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <group
+        android:pivotX="256"
+        android:pivotY="256"
+        android:scaleX="0.66"
+        android:scaleY="0.66">
+
+        <!-- atmosphere -->
+        <path android:pathData="M36,256a220,220 0 1,0 440,0a220,220 0 1,0 -440,0">
+            <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+                <gradient
+                    android:type="radial"
+                    android:centerX="256"
+                    android:centerY="256"
+                    android:gradientRadius="220">
+                    <item android:offset="0.0" android:color="#24FFB000" />
+                    <item android:offset="1.0" android:color="#00FFB000" />
+                </gradient>
+            </aapt:attr>
+        </path>
+
+        <!-- dim outer ring -->
+        <path
+            android:pathData="M44,256a212,212 0 1,0 424,0a212,212 0 1,0 -424,0"
+            android:strokeColor="#2A1F00"
+            android:strokeWidth="7" />
+
+        <!-- countdown arc: soft pass, then the crisp one -->
+        <path
+            android:pathData="M256,44 A212,212 0 1 1 68,150"
+            android:strokeColor="#59FFB000"
+            android:strokeWidth="11"
+            android:strokeLineCap="round" />
+        <path
+            android:pathData="M256,44 A212,212 0 1 1 68,150"
+            android:strokeColor="#FFD97A"
+            android:strokeWidth="4"
+            android:strokeLineCap="round" />
+
+        <!-- eye: soft pass, then the lid -->
+        <path
+            android:pathData="M92,256 Q256,118 420,256 Q256,394 92,256 Z"
+            android:strokeColor="#4DFFB000"
+            android:strokeWidth="20"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M92,256 Q256,118 420,256 Q256,394 92,256 Z"
+            android:fillColor="#0A0700"
+            android:strokeColor="#FFD97A"
+            android:strokeWidth="12"
+            android:strokeLineJoin="round" />
+
+        <!-- iris -->
+        <path android:pathData="M190,256a66,66 0 1,0 132,0a66,66 0 1,0 -132,0">
+            <aapt:attr xmlns:aapt="http://schemas.android.com/aapt" name="android:fillColor">
+                <gradient
+                    android:type="radial"
+                    android:centerX="245.4"
+                    android:centerY="240.2"
+                    android:gradientRadius="85.8">
+                    <item android:offset="0.0" android:color="#FFE49A" />
+                    <item android:offset="0.55" android:color="#FFB000" />
+                    <item android:offset="1.0" android:color="#8A5A00" />
+                </gradient>
+            </aapt:attr>
+        </path>
+        <path
+            android:pathData="M190,256a66,66 0 1,0 132,0a66,66 0 1,0 -132,0"
+            android:strokeColor="#80FFB000"
+            android:strokeWidth="6" />
+
+        <!-- pupil -->
+        <path
+            android:pathData="M224,256a32,32 0 1,0 64,0a32,32 0 1,0 -64,0"
+            android:fillColor="#000000" />
+        <path
+            android:pathData="M240,256a16,16 0 1,0 32,0a16,16 0 1,0 -32,0"
+            android:strokeColor="#FFB000"
+            android:strokeWidth="4" />
+
+        <!-- catchlight -->
+        <path
+            android:pathData="M225,232a9,9 0 1,0 18,0a9,9 0 1,0 -18,0"
+            android:fillColor="#F2FFFFFF" />
+    </group>
+</vector>

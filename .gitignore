@@ -1,0 +1,11 @@
+# Android / Gradle
+.gradle/
+build/
+**/build/
+
+# Local Android configuration
+local.properties
+
+# Design exports
+design/screens/
+design/Do Not Blink.html

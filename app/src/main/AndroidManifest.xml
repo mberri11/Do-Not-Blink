@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      The Google Mobile Ads SDK is the only thing in this app that touches the network. It merges
+      these in itself; they are declared here so the manifest states the whole truth.
+      The advertising ID is the only thing this app collects, and it is declared as such in the
+      Play Data safety form.
+    -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.DoNotBlink">
+
+        <!--
+          Debug builds carry Google's public test App ID; release builds take ADMOB_APP_ID from
+          local.properties, which is git-ignored. play-services-ads crashes the process at startup
+          if this meta-data is absent.
+        -->
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="${admobAppId}" />
+
+        <!--
+          No android:screenOrientation on purpose: API 36 ignores orientation locks on sw600dp
+          displays, so declaring one is misleading. Portrait-first is a layout decision.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.DoNotBlink.Splash">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
