@@ -19,8 +19,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import com.simobr.donotblink.ui.common.noRippleClickable
 import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbType
@@ -36,18 +38,35 @@ object HomeTags {
     const val SETTINGS = "home-settings"
     const val BEST = "home-best"
     const val HOLD = "home-hold"
+    const val RULE = "home-rule"
 }
 
-/** Mockup styles with no frozen token: derived from the nearest token, never added to DnbType. */
-private val BestLabelStyle = DnbType.microLabel.copy(letterSpacing = 0.5.em)
+/**
+ * Mockup styles with no frozen token: derived from the nearest token, never added to DnbType.
+ *
+ * BEST and TITLES carry information and TITLES is tappable, so both sit on [DnbColor.LabelMid]
+ * rather than Dim — Dim is unreadable at low panel brightness and is now decorative only.
+ */
+internal val BestLabelStyle = DnbType.microLabel.copy(letterSpacing = 0.5.em, color = DnbColor.LabelMid)
 private val HoldToBeginStyle = DnbType.ctaSmall.copy(letterSpacing = 0.36.em, color = DnbColor.Phosphor)
-private val TitlesLinkStyle = DnbType.microLabel.copy(letterSpacing = 0.28.em)
+internal val TitlesLinkStyle = DnbType.microLabel.copy(letterSpacing = 0.28.em, color = DnbColor.LabelMid)
+
+/** The rule, stated. 10sp / W400 / 0.28em on LabelMid — the same line the ring draws under itself. */
+internal val RuleLineStyle = DnbType.microLabel.copy(
+    fontSize = 10.sp,
+    fontWeight = FontWeight.W400,
+    letterSpacing = 0.28.em,
+    color = DnbColor.LabelMid,
+)
 
 private const val BEST_LABEL_TOP_DP = 250f
 private const val BEST_NUMERAL_TOP_DP = 280f
 private const val GLOW_CENTRE_Y_DP = 355f
 private const val GLOW_RADIUS_DP = 195f
 private const val HOLD_TOP_DP = 566f
+
+/** HOLD's own box is ~18dp tall at 12.5sp; the rule line sits 14dp under it. */
+private const val RULE_TOP_DP = 598f
 private const val BREATHE_PERIOD_MS = 2400L
 private const val GEAR_SIZE_DP = 18f
 private const val GEAR_STROKE_DP = 1.4f
@@ -115,6 +134,17 @@ fun HomeChrome(
                 .padding(top = HOLD_TOP_DP.dp)
                 .testTag(HomeTags.HOLD)
                 .graphicsLayer { alpha = breathe.floatValue },
+        )
+
+        // The rule. It does not breathe and it never leaves: this is the one place the game says
+        // what it wants the player to do.
+        Text(
+            text = "RELEASE ON THE RING",
+            style = RuleLineStyle,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = RULE_TOP_DP.dp)
+                .testTag(HomeTags.RULE),
         )
 
         Text(

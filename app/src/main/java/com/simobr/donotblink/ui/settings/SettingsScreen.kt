@@ -47,16 +47,29 @@ object SettingsTags {
     const val BUILD = "settings-build"
 }
 
-/** Mockup styles with no frozen token: derived from the nearest token, never added to DnbType. */
+/**
+ * Mockup styles with no frozen token: derived from the nearest token, never added to DnbType.
+ *
+ * A row's value carries information and OPEN is tappable, so both sit on [DnbColor.LabelMid] —
+ * Dim is unreadable at low panel brightness. Dim stays exactly where it belongs: OFF, an
+ * off-state, which is meant to read as absent.
+ */
 private val ValueOnStyle = DnbType.settingsRow.copy(
     fontSize = 11.sp,
     fontWeight = FontWeight.W500,
     color = DnbColor.Hot,
 )
-private val ValueOffStyle = DnbType.settingsRow.copy(fontSize = 11.sp, color = DnbColor.Dim)
-private val ValueQuietStyle = DnbType.settingsRow.copy(fontSize = 11.sp, color = DnbColor.Dim)
-private val OpenStyle = DnbType.settingsRow.copy(fontSize = 10.sp, color = DnbColor.Dim)
-private val BuildStyle = DnbType.microLabel.copy(fontSize = 9.sp, letterSpacing = 0.28.em)
+internal val ValueOffStyle = DnbType.settingsRow.copy(fontSize = 11.sp, color = DnbColor.Dim)
+internal val ValueQuietStyle = DnbType.settingsRow.copy(fontSize = 11.sp, color = DnbColor.LabelMid)
+internal val OpenStyle = DnbType.settingsRow.copy(fontSize = 10.sp, color = DnbColor.LabelMid)
+internal val BuildStyle = DnbType.microLabel.copy(
+    fontSize = 9.sp,
+    letterSpacing = 0.28.em,
+    color = DnbColor.LabelMid,
+)
+
+/** NO is a tappable answer, not an off-state, so it is readable rather than absent. */
+internal val ValueDeclineStyle = DnbType.settingsRow.copy(fontSize = 11.sp, color = DnbColor.LabelMid)
 
 private const val TITLE_TOP_DP = 78f
 private const val ROWS_TOP_DP = 150f
@@ -139,7 +152,7 @@ fun SettingsScreen(
                             )
                             Text(
                                 text = "NO",
-                                style = ValueOffStyle.tinted(palette),
+                                style = ValueDeclineStyle,
                                 modifier = Modifier
                                     .testTag(SettingsTags.RESET_NO)
                                     .noRippleClickable { confirmingReset = false },

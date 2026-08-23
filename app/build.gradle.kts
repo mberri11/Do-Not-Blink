@@ -18,6 +18,13 @@ val TEST_BANNER_UNIT = "ca-app-pub-3940256099942544/6300978111"
 val TEST_INTERSTITIAL_UNIT = "ca-app-pub-3940256099942544/1033173712"
 val TEST_REWARDED_UNIT = "ca-app-pub-3940256099942544/5224354917"
 
+/**
+ * The published privacy policy, from gradle.properties. Not a secret — the Play listing shows it
+ * to everyone — so it is committed, and the settings row reads it through BuildConfig.
+ */
+val privacyPolicyUrl: String =
+    (providers.gradleProperty("donotblink.privacyPolicyUrl").orNull ?: "").trim()
+
 
 plugins {
     alias(libs.plugins.android.application)
@@ -37,6 +44,9 @@ android {
         versionName = "0.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Public information, so it lives in gradle.properties rather than local.properties.
+        buildConfigField("String", "PRIVACY_POLICY_URL", "\"$privacyPolicyUrl\"")
     }
 
 

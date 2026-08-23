@@ -71,24 +71,78 @@ class DifficultyTest {
     /**
      * The four sanity rows, to 1 decimal place.
      *
-     * These are the values the FORMULAS in the brief produce. Three of the four rows as written in
-     * the brief do not follow from those formulas — see the stage report. Stated vs derived:
+     * These are the values the FORMULAS produce, with BAND_BASE_DP at the Stage 5.5 value of
+     * 7.5dp (it was 9.5dp through Stage 5). The early game is what moved:
      *
-     *   s=0   stated travel 1560.0 speed  46.2 band 7.8 window 169.0
-     *         derived travel 1560.0 speed  46.2 band 9.5 window 205.8   <- band/window differ
-     *   s=8   stated travel  866.0 speed  83.1 band 7.3 window  88.0
-     *         derived travel  872.9 speed  82.5 band 7.3 window  88.0   <- travel/speed differ
-     *   s=16  stated travel  480.0 speed 150.0 band 7.8 window  52.0
-     *         derived travel  488.5 speed 147.4 band 7.7 window  52.0   <- floor engages at s=17
-     *   s=40  stated travel  480.0 speed 150.0 band 7.8 window  52.0
-     *         derived travel  480.0 speed 150.0 band 7.8 window  52.0   <- matches exactly
+     *   s=0   was band 9.5 window 205.8   now band 7.5 window 162.5
+     *   s=8   was band 7.3 window  88.0   now band 5.3 window  63.8
+     *   s=16  was band 7.7 window  52.0   now band 7.7 window  52.0   <- clamped either way
+     *   s=40  was band 7.8 window  52.0   now band 7.8 window  52.0   <- the plateau is untouched
      */
     @Test
     fun sanity_rows_to_one_decimal_place() {
-        assertRow(streak = 0, travelMs = 1560.0f, speedDpPerSec = 46.2f, bandDp = 9.5f, halfWindowMs = 205.8f, clamped = false)
-        assertRow(streak = 8, travelMs = 872.9f, speedDpPerSec = 82.5f, bandDp = 7.3f, halfWindowMs = 88.0f, clamped = false)
+        assertRow(streak = 0, travelMs = 1560.0f, speedDpPerSec = 46.2f, bandDp = 7.5f, halfWindowMs = 162.5f, clamped = false)
+        assertRow(streak = 8, travelMs = 872.9f, speedDpPerSec = 82.5f, bandDp = 5.3f, halfWindowMs = 63.8f, clamped = false)
         assertRow(streak = 16, travelMs = 488.5f, speedDpPerSec = 147.4f, bandDp = 7.7f, halfWindowMs = 52.0f, clamped = true)
         assertRow(streak = 40, travelMs = 480.0f, speedDpPerSec = 150.0f, bandDp = 7.8f, halfWindowMs = 52.0f, clamped = true)
+    }
+
+    // 5b -----------------------------------------------------------------------------------------
+
+    /**
+     * The narrower band brings the fairness clamp forward. At 9.5dp the raw band was still worth
+     * more than the floor well past streak 10; at 7.5dp streak 9 is the last honest one and streak
+     * 10's raw 4.7dp is worth 49.3ms — under the 52ms floor, so the band widens to hold the window
+     * there. Everything from 10 up is judged on the plateau, not on the raw curve.
+     */
+    @Test
+    fun the_fairness_clamp_now_engages_at_streak_ten() {
+        assertEquals(52f, Difficulty.HUMAN_FLOOR_MS, 0f)
+        assertEquals(7.5f, Difficulty.BAND_BASE_DP, 0f)
+
+        for (streak in 0..9) {
+            assertTrue(
+                "streak $streak should still be judged on the raw band: raw window is " +
+                    "${Difficulty.rawHalfWindowMs(streak)}ms",
+                !Difficulty.isFairnessClamped(streak),
+            )
+        }
+        assertTrue(
+            "streak 10's raw window is ${Difficulty.rawHalfWindowMs(10)}ms and must be clamped",
+            Difficulty.isFairnessClamped(10),
+        )
+        assertTrue(Difficulty.rawHalfWindowMs(9) >= Difficulty.HUMAN_FLOOR_MS)
+        assertTrue(Difficulty.rawHalfWindowMs(10) < Difficulty.HUMAN_FLOOR_MS)
+
+        // Once clamped, the band is WIDER than the raw curve would have made it — that is the
+        // whole point of the clamp.
+        for (streak in 10..60) {
+            assertTrue(
+                "streak $streak: clamped band ${Difficulty.bandDp(streak)} < raw ${Difficulty.rawBandDp(streak)}",
+                Difficulty.bandDp(streak) >= Difficulty.rawBandDp(streak),
+            )
+        }
+    }
+
+    // 5c -----------------------------------------------------------------------------------------
+
+    /** The approved Stage 5.5 constants, pinned so a "visual balance" edit fails here first. */
+    @Test
+    fun the_approved_precision_constants_are_what_they_were_approved_as() {
+        assertEquals(7.5f, Difficulty.BAND_BASE_DP, 0f)
+        assertEquals(1.5f, Difficulty.OVERSHOOT_MARGIN_DP, 0f)
+        assertEquals(52f, Difficulty.HUMAN_FLOOR_MS, 0f)
+        assertEquals(3.5f, Difficulty.BAND_MIN_DP, 0f)
+
+        // A held ring dies 1.5dp past the band, not 3dp.
+        for (streak in listOf(0, 8, 16, 40)) {
+            assertEquals(
+                "overshootFailDp($streak)",
+                Difficulty.bandDp(streak) + 1.5f,
+                Difficulty.overshootFailDp(streak),
+                0.0001f,
+            )
+        }
     }
 
     // 6 ------------------------------------------------------------------------------------------

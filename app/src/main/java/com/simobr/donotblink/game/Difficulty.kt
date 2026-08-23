@@ -29,7 +29,7 @@ object Difficulty {
     const val TRAVEL_DECAY = 0.93f
     const val MIN_TRAVEL_MS = 480f
 
-    const val BAND_BASE_DP = 9.5f
+    const val BAND_BASE_DP = 7.5f
     const val BAND_SLOPE_DP = 0.28f
     const val BAND_MIN_DP = 3.5f
 
@@ -41,7 +41,7 @@ object Difficulty {
     const val STROKE_MIN_DP = 0.8f
 
     /** How far past the line the ring travels before the round is lost without a release. */
-    const val OVERSHOOT_MARGIN_DP = 3f
+    const val OVERSHOOT_MARGIN_DP = 1.5f
 
     // ---- unpredictability ladder -------------------------------------------------------------
 
@@ -88,8 +88,15 @@ object Difficulty {
             rawBandDp(streak)
         }
 
-    /** The effective half-window, either side of the line. Never below [HUMAN_FLOOR_MS]. */
-    fun halfWindowMs(streak: Int): Float = bandDp(streak) / speedDpPerSec(streak) * 1000f
+    /**
+     * The effective half-window, either side of the line. Never below [HUMAN_FLOOR_MS].
+     *
+     * A clamped streak reports the floor directly rather than dividing the widened band back out
+     * by the speed it was multiplied by: that round trip is not exact in Float and lands a few
+     * ten-thousandths under the floor, which is a lie about the one invariant this curve has.
+     */
+    fun halfWindowMs(streak: Int): Float =
+        if (isFairnessClamped(streak)) HUMAN_FLOOR_MS else rawHalfWindowMs(streak)
 
     fun strokeDp(streak: Int): Float = max(STROKE_MIN_DP, STROKE_BASE_DP - STROKE_SLOPE_DP * streak)
 

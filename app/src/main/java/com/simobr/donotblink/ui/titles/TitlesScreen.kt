@@ -37,12 +37,18 @@ object TitlesTags {
     const val REVEAL = "titles-reveal"
 }
 
-/** Mockup styles with no frozen token: derived from the nearest token, never added to DnbType. */
-private val CountStyle = DnbType.microLabel.copy(fontSize = 10.sp, letterSpacing = 0.2.em)
+/**
+ * Mockup styles with no frozen token: derived from the nearest token, never added to DnbType.
+ *
+ * The count and every threshold carry information, so they sit on [DnbColor.LabelMid]. The locked
+ * NAMES stay on the palette's dim — those are decorative, and being barely there is the point.
+ */
+internal val CountStyle =
+    DnbType.microLabel.copy(fontSize = 10.sp, letterSpacing = 0.2.em, color = DnbColor.LabelMid)
 private val ThresholdUnlockedStyle =
     DnbType.microLabel.copy(fontSize = 10.sp, letterSpacing = 0.16.em, color = DnbColor.Hot)
-private val ThresholdLockedStyle =
-    DnbType.microLabel.copy(fontSize = 10.sp, letterSpacing = 0.16.em, color = DnbColor.Dim)
+internal val ThresholdLockedStyle =
+    DnbType.microLabel.copy(fontSize = 10.sp, letterSpacing = 0.16.em, color = DnbColor.LabelMid)
 
 private const val HEADER_TOP_DP = 78f
 private const val LIST_TOP_DP = 140f

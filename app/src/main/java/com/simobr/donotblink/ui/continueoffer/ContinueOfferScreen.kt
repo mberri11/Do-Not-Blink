@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.simobr.donotblink.ui.common.noRippleClickable
+import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbDim
 import com.simobr.donotblink.ui.theme.DnbType
 import com.simobr.donotblink.ui.theme.LocalPalette
@@ -117,7 +118,11 @@ fun ContinueOfferScreen(
 
         Text(
             text = "ONCE PER RUN",
-            style = DnbType.microLabel.copy(fontSize = 8.5.sp, letterSpacing = 0.45.em).tinted(palette),
+            style = DnbType.microLabel.copy(
+                fontSize = 8.5.sp,
+                letterSpacing = 0.45.em,
+                color = DnbColor.LabelMid,
+            ),
             modifier = Modifier.align(Alignment.TopCenter).padding(top = BADGE_TOP_DP.dp),
         )
 
@@ -157,7 +162,12 @@ fun ContinueOfferScreen(
 
         Text(
             text = "ACCEPT THE BLINK",
-            style = DnbType.microLabel.copy(fontSize = 10.sp, letterSpacing = 0.3.em).tinted(palette),
+            // The decline is a real choice, not a footnote: readable at any panel brightness.
+            style = DnbType.microLabel.copy(
+                fontSize = 10.sp,
+                letterSpacing = 0.3.em,
+                color = DnbColor.LabelMid,
+            ),
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .padding(top = DECLINE_TOP_DP.dp)

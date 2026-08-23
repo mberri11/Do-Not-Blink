@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbType
 import com.simobr.donotblink.ui.theme.LocalPalette
 import com.simobr.donotblink.ui.theme.tinted
@@ -92,7 +93,7 @@ fun RoundCardScreen(
 
         Text(
             text = "ROUND",
-            style = DnbType.microLabel.copy(letterSpacing = 0.5.em).tinted(palette),
+            style = DnbType.microLabel.copy(letterSpacing = 0.5.em, color = DnbColor.LabelMid),
             modifier = Modifier.align(Alignment.TopCenter).padding(top = LABEL_TOP_DP.dp),
         )
         Text(

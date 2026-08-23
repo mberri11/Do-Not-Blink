@@ -62,6 +62,26 @@ Recorded so later stages do not drift. Change only with a reason.
 All versions live in `gradle/libs.versions.toml`. Never hardcode a version in a
 `build.gradle.kts`.
 
+## PINNED GAME CONSTANTS
+Architect-approved values. Changing one is a conversation, not an edit — `DifficultyTest` pins
+them and will name the offender.
+
+| Constant | Value | Approved |
+| --- | --- | --- |
+| `Difficulty.BAND_BASE_DP` | 7.5 (was 9.5) | Stage 5.5 — 2026-08-22 |
+| `Difficulty.OVERSHOOT_MARGIN_DP` | 1.5 (was 3.0) | Stage 5.5 — 2026-08-22 |
+| `Difficulty.HUMAN_FLOOR_MS` | 52 | Stage 2 |
+| `Difficulty.BAND_MIN_DP` | 3.5 | Stage 2 |
+
+The two Stage 5.5 changes firm up the EARLY game only: the streak-0 half-window drops from
+~205ms to ~162ms and the fairness clamp now engages at streak 10 instead of later. The endgame
+plateau is untouched — every clamped streak is still judged on a 52ms half-window.
+
+## PRIVACY POLICY
+`donotblink.privacyPolicyUrl` in `gradle.properties` -> `BuildConfig.PRIVACY_POLICY_URL` ->
+the SETTINGS row. Public information, committed on purpose. The same URL must appear in the Play
+Console listing and in AdMob's app settings.
+
 ## AD SDK NOTE
 `play-services-ads` ships a `MobileAdsInitProvider` that throws at process start when
 `com.google.android.gms.ads.APPLICATION_ID` meta-data is absent from the manifest. The manifest

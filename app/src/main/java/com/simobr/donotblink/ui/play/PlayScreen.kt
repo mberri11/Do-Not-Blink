@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.paddingFromBaseline
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.FloatState
@@ -29,13 +30,17 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.simobr.donotblink.game.Difficulty
 import com.simobr.donotblink.game.GameEvent
 import com.simobr.donotblink.game.GameViewModel
 import com.simobr.donotblink.game.Phase
 import com.simobr.donotblink.game.RoundPlan
+import com.simobr.donotblink.game.Teaching
 import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbDim
 import com.simobr.donotblink.ui.theme.DnbType
@@ -49,7 +54,24 @@ import kotlinx.coroutines.isActive
 object PlayScreenTags {
     const val SURFACE = "play-surface"
     const val STREAK = "play-streak"
+    const val RULE = "play-rule"
 }
+
+/**
+ * Mockup styles with no frozen token: derived from the nearest token, never added to DnbType.
+ *
+ * The STREAK caption carries information, so it sits on [DnbColor.LabelMid] rather than Dim, which
+ * is unreadable at low panel brightness and is now decorative only.
+ */
+internal val StreakCaptionStyle = DnbType.microLabel.copy(color = DnbColor.LabelMid)
+
+/** The rule, stated under the ring while the player is still learning it. */
+internal val RuleLineStyle = DnbType.microLabel.copy(
+    fontSize = 10.sp,
+    fontWeight = FontWeight.W400,
+    letterSpacing = 0.28.em,
+    color = DnbColor.LabelMid,
+)
 
 /** Outer dim track, and the tick marks that sit just outside it. Read off the mockup. */
 private const val OUTER_TRACK_DP = 168f
@@ -59,6 +81,9 @@ private const val BLOOM_DP = 64f
 private const val SHOCK_TRAVEL_DP = 32f
 private const val STREAK_TOP_DP = 88f
 private const val STREAK_GAP_DP = 16f
+
+/** The teaching line's baseline, 120dp below the ring centre. */
+private val RULE_BASELINE_FROM_TOP = DnbDim.ringCentreYFromTop + 120.dp
 
 /** How long the dead ring is left standing before the fail screen replaces it. */
 const val FAIL_DWELL_MS = 450L
@@ -112,7 +137,20 @@ fun PlayScreen(
                 viewModel.onFrame(now)
 
                 val current = viewModel.state.value
-                ringRadiusDp.floatValue = viewModel.ringRadiusDpAt(now)
+                val radiusDp = viewModel.ringRadiusDpAt(now)
+                ringRadiusDp.floatValue = radiusDp
+
+                // The hum is the ring in audio. It rides this same frame — no second clock, no
+                // second sampling of the round.
+                if (current.phase == Phase.Holding && current.soundEnabled) {
+                    feedback.hold(
+                        HoldHum.frequencyHz(
+                            radiusDp = radiusDp,
+                            startRadiusDp = current.plan.startRadiusDp,
+                            targetRadiusDp = current.plan.targetRadiusDp,
+                        )
+                    )
+                }
 
                 val elapsedMs = (now - current.roundStartUptimeMs).toFloat()
                 ringHidden.value = current.phase == Phase.Holding &&
@@ -137,11 +175,19 @@ fun PlayScreen(
     LaunchedEffect(viewModel, feedback) {
         viewModel.events.collect { event ->
             val current = viewModel.state.value
+            // The hum dies on the frame of judgement, before the verdict's own tone starts.
+            feedback.stopHold()
             when (event) {
                 is GameEvent.Perfect -> feedback.perfect(current.hapticsEnabled, current.soundEnabled)
                 is GameEvent.Fail -> feedback.fail(current.hapticsEnabled, current.soundEnabled)
             }
         }
+    }
+
+    // A cancelled gesture never reaches the event flow, and SOUND can be switched off mid-hold.
+    // Either way the hum stops with its release ramp rather than being left running.
+    LaunchedEffect(state.phase, state.soundEnabled) {
+        if (state.phase != Phase.Holding || !state.soundEnabled) feedback.stopHold()
     }
 
     Box(modifier.fillMaxSize()) {
@@ -179,6 +225,18 @@ fun PlayScreen(
                 digitScale = digitScale,
                 modifier = Modifier.align(Alignment.TopCenter),
             )
+
+            // The rule, for as long as the player is still learning it, and then never again.
+            if (Teaching.showsRingLine(state.lifetimeRuns, state.streak)) {
+                Text(
+                    text = "release when the ring meets the line",
+                    style = RuleLineStyle,
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .paddingFromBaseline(top = RULE_BASELINE_FROM_TOP)
+                        .testTag(PlayScreenTags.RULE),
+                )
+            }
         }
     }
 }
@@ -237,7 +295,7 @@ private fun StreakBlock(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(STREAK_GAP_DP.dp),
     ) {
-        Text(text = "STREAK", style = DnbType.microLabel.tinted(palette))
+        Text(text = "STREAK", style = StreakCaptionStyle)
         Text(
             text = streak.toString().padStart(2, '0'),
             style = (if (phase == Phase.Perfect) DnbType.streakPerfect else DnbType.streakLive)
@@ -291,7 +349,11 @@ private fun DrawScope.drawRound(
 
     // 4. glow stack, then the core. No blur, no RenderEffect, no shadow — concentric strokes.
     if (!ringHidden) {
-        val live = ringRadiusDp.dp.toPx()
+        // Flash snap. A release inside the band can still sit visibly off the line, which makes a
+        // clean hit look sloppy. The Perfect frame is drawn ON the line; Release.errorDp still
+        // carries the true value and the judgement never sees this.
+        val liveDp = if (phase == Phase.Perfect) plan.targetRadiusDp else ringRadiusDp
+        val live = liveDp.dp.toPx()
         val ringColour = if (phase == Phase.Idle || phase == Phase.Holding || phase == Phase.Perfect) {
             lerp(palette.phosphor, palette.hot, flash)
         } else {
@@ -303,7 +365,7 @@ private fun DrawScope.drawRound(
         if (palette.trailMs > 0 && phase == Phase.Holding) {
             repeat(TRAIL_STEPS) { step ->
                 val ageMs = palette.trailMs * (step + 1f) / TRAIL_STEPS
-                val ghost = (ringRadiusDp + plan.speedDpPerSec * (ageMs / 1000f)).dp.toPx()
+                val ghost = (liveDp + plan.speedDpPerSec * (ageMs / 1000f)).dp.toPx()
                 val ghostAlpha = 0.32f * (1f - (step + 1f) / (TRAIL_STEPS + 1f))
                 drawCircle(
                     color = ringColour.copy(alpha = ghostAlpha),

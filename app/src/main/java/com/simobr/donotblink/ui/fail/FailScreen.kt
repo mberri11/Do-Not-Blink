@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,10 +31,12 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.simobr.donotblink.ads.AdaptiveAnchoredBanner
+import com.simobr.donotblink.ads.rememberBannerSlotHeight
 import com.simobr.donotblink.game.Title
 import com.simobr.donotblink.ui.common.noRippleClickable
 import com.simobr.donotblink.ui.theme.DnbColor
@@ -51,14 +54,19 @@ object FailTags {
     const val BANNER = "fail-banner"
 }
 
-/** Mockup styles with no frozen token: derived from the nearest token, never added to DnbType. */
-private val StreakLabelStyle = DnbType.microLabel
-private val BestLineStyle = DnbType.microLabel.copy(
+/**
+ * Mockup styles with no frozen token: derived from the nearest token, never added to DnbType.
+ *
+ * STREAK, BEST and HOME all carry information and HOME is tappable, so they sit on
+ * [DnbColor.LabelMid]. Dim is unreadable at low panel brightness and is now decorative only.
+ */
+internal val StreakLabelStyle = DnbType.microLabel.copy(color = DnbColor.LabelMid)
+internal val BestLineStyle = DnbType.microLabel.copy(
     fontSize = 10.sp,
     letterSpacing = 0.34.em,
-    color = DnbColor.Phosphor.copy(alpha = 0.42f),
+    color = DnbColor.LabelMid,
 )
-private val HomeLinkStyle = DnbType.microLabel.copy(letterSpacing = 0.3.em)
+internal val HomeLinkStyle = DnbType.microLabel.copy(letterSpacing = 0.3.em, color = DnbColor.LabelMid)
 private val UnlockedThresholdStyle = DnbType.microLabel.copy(fontSize = 10.sp, letterSpacing = 0.16.em)
 
 private const val BLINKED_TOP_DP = 104f
@@ -67,9 +75,19 @@ private const val STREAK_LABEL_TOP_DP = 300f
 private const val STREAK_NUMERAL_TOP_DP = 322f
 private const val BEST_LINE_TOP_DP = 444f
 private const val UNLOCKED_TOP_DP = 520f
-private const val AGAIN_TOP_DP = 604f
-private const val HOME_TOP_DP = 690f
-private const val BANNER_HEIGHT_DP = 60f
+
+/**
+ * The mockup's AGAIN->HOME centres are 86dp apart, which is a 28dp gap under the 58dp button.
+ * AGAIN and HOME are the only things on this screen positioned from the BOTTOM edge: absolute
+ * mockup Y-coordinates do not survive a real screen, and 690dp landed HOME on top of the banner.
+ */
+private const val AGAIN_TO_HOME_GAP_DP = 28f
+
+/** HOME's touch target. 10sp of type is not a 48dp target on its own. */
+private const val HOME_TOUCH_TARGET_DP = 48f
+
+/** Clear air between the HOME target and the top of the reserved banner slot. */
+private const val BOTTOM_BLOCK_TO_BANNER_DP = 24f
 private const val REVEAL_FADE_MS = 400f
 private const val REVEAL_MS_PER_CHAR = 24f
 
@@ -85,6 +103,7 @@ fun FailScreen(
     onHome: () -> Unit,
     modifier: Modifier = Modifier,
     bannerEnabled: Boolean = false,
+    bannerSlotHeight: Dp = rememberBannerSlotHeight(),
 ) {
     val palette = LocalPalette.current
     BackHandler(onBack = onHome)
@@ -150,30 +169,43 @@ fun FailScreen(
             }
         }
 
-        AgainButton(
-            palette = palette,
-            onClick = onAgain,
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = AGAIN_TOP_DP.dp),
-        )
-
-        Text(
-            text = "HOME",
-            style = HomeLinkStyle.tinted(palette),
+        // Everything the player can touch is anchored to the bottom edge, above the reserved
+        // banner slot and above the navigation bar. The upper composition keeps its mockup offsets.
+        Column(
             modifier = Modifier
-                .align(Alignment.TopCenter)
-                .padding(top = HOME_TOP_DP.dp)
-                .testTag(FailTags.HOME)
-                .noRippleClickable(onClick = onHome),
-        )
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = bannerSlotHeight + BOTTOM_BLOCK_TO_BANNER_DP.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            AgainButton(palette = palette, onClick = onAgain)
+
+            Spacer(Modifier.height(AGAIN_TO_HOME_GAP_DP.dp))
+
+            Box(
+                modifier = Modifier
+                    .height(HOME_TOUCH_TARGET_DP.dp)
+                    .testTag(FailTags.HOME)
+                    .noRippleClickable(onClick = onHome),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "HOME",
+                    style = HomeLinkStyle.tinted(palette),
+                    modifier = Modifier.padding(horizontal = DnbDim.screenPadH),
+                )
+            }
+        }
 
         // The app's ONLY banner surface. It is created when this screen enters and destroyed the
-        // moment the player leaves it, and it never appears during a run.
+        // moment the player leaves it, and it never appears during a run. The slot is reserved at
+        // its true height whether or not an ad ever arrives, so nothing on the screen shifts.
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .navigationBarsPadding()
                 .fillMaxWidth()
-                .height(BANNER_HEIGHT_DP.dp)
+                .height(bannerSlotHeight)
                 .testTag(FailTags.BANNER),
             contentAlignment = Alignment.Center,
         ) {

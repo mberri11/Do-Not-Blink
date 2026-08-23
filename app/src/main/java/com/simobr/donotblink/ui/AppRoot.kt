@@ -1,5 +1,8 @@
 package com.simobr.donotblink.ui
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.background
@@ -16,7 +19,9 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.simobr.donotblink.BuildConfig
 import com.simobr.donotblink.game.GameViewModel
 import com.simobr.donotblink.game.Phase
 import com.simobr.donotblink.ui.continueoffer.ContinueOfferScreen
@@ -98,14 +103,30 @@ fun AppRoot(
                     },
                 )
 
-                Screen.Home -> PlayScreen(
-                    viewModel = viewModel,
-                    homeChrome = true,
-                    onRoundStarted = { screen = Screen.Play },
-                    onFailed = { screen = afterFail(viewModel) },
-                    onOpenTitles = { screen = Screen.Titles },
-                    onOpenSettings = { screen = Screen.Settings },
-                )
+                // ONE call site for Home and Play. They are not two screens: Home is the idle face
+                // of the play surface. Two branches meant the press that starts a round disposed
+                // the very node handling it — the gesture was cancelled mid-hold and the first
+                // round of every session was unwinnable. Here `screen` only flips `homeChrome`,
+                // which is a plain recomposition: the Canvas, its pointerInput keys and the
+                // running gesture coroutine all survive, so the hold that began on Home is the
+                // hold that gets judged.
+                Screen.Home, Screen.Play -> {
+                    // Back leaves a run; on Home it is the system's to handle, so it is disabled
+                    // rather than conditionally registered — an unconditional call site keeps the
+                    // composition structure identical either side of the flip.
+                    BackHandler(enabled = screen == Screen.Play) {
+                        viewModel.startNewRun()
+                        screen = Screen.Home
+                    }
+                    PlayScreen(
+                        viewModel = viewModel,
+                        homeChrome = screen == Screen.Home,
+                        onRoundStarted = { screen = Screen.Play },
+                        onFailed = { screen = afterFail(viewModel) },
+                        onOpenTitles = { screen = Screen.Titles },
+                        onOpenSettings = { screen = Screen.Settings },
+                    )
+                }
 
                 Screen.RoundCard -> {
                     val withInterstitial = remember(state.roundId) { viewModel.shouldShowInterstitialNow() }
@@ -115,17 +136,6 @@ fun AppRoot(
                         withInterstitial = withInterstitial,
                         showInterstitial = { onFinished -> viewModel.showInterstitial(onFinished) },
                         onFinished = { screen = Screen.Play },
-                    )
-                }
-
-                Screen.Play -> {
-                    BackHandler {
-                        viewModel.startNewRun()
-                        screen = Screen.Home
-                    }
-                    PlayScreen(
-                        viewModel = viewModel,
-                        onFailed = { screen = afterFail(viewModel) },
                     )
                 }
 
@@ -167,19 +177,21 @@ fun AppRoot(
                     onWatchToReveal = { viewModel.purchaseTitleReveal() },
                 )
 
-                Screen.Settings -> SettingsScreen(
-                    hapticsEnabled = state.hapticsEnabled,
-                    soundEnabled = state.soundEnabled,
-                    bestStreak = state.best,
-                    phosphorLabel = palette.label,
-                    onSetHaptics = viewModel::setHaptics,
-                    onSetSound = viewModel::setSound,
-                    onResetBest = viewModel::resetBest,
-                    onOpenPhosphor = { screen = Screen.Phosphor },
-                    // No policy URL exists yet; the row is drawn and does nothing.
-                    onOpenPrivacyPolicy = {},
-                    onBack = { screen = Screen.Home },
-                )
+                Screen.Settings -> {
+                    val context = LocalContext.current
+                    SettingsScreen(
+                        hapticsEnabled = state.hapticsEnabled,
+                        soundEnabled = state.soundEnabled,
+                        bestStreak = state.best,
+                        phosphorLabel = palette.label,
+                        onSetHaptics = viewModel::setHaptics,
+                        onSetSound = viewModel::setSound,
+                        onResetBest = viewModel::resetBest,
+                        onOpenPhosphor = { screen = Screen.Phosphor },
+                        onOpenPrivacyPolicy = { openUrl(context, BuildConfig.PRIVACY_POLICY_URL) },
+                        onBack = { screen = Screen.Home },
+                    )
+                }
 
                 Screen.Phosphor -> PhosphorScreen(
                     selectedId = state.selectedPhosphorId,
@@ -196,3 +208,17 @@ fun AppRoot(
 /** A fail either buys the player an offer, or it is simply over. */
 private fun afterFail(viewModel: GameViewModel): Screen =
     if (viewModel.state.value.phase == Phase.ContinueOffer) Screen.ContinueOffer else Screen.Fail
+
+/**
+ * Hands a URL to whatever the device uses for the web. A plain [Intent.ACTION_VIEW] — Custom Tabs
+ * would mean androidx.browser, and the dependency list in CLAUDE.md is exact.
+ *
+ * A device with no browser at all throws [ActivityNotFoundException]; the row then does nothing,
+ * which is the specified behaviour. Nothing here is worth a crash.
+ */
+private fun openUrl(context: Context, url: String) {
+    if (url.isBlank()) return
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    runCatching { context.startActivity(intent) }
+}
