@@ -48,6 +48,7 @@ object SettingsTags {
     const val PHOSPHOR = "settings-phosphor"
     const val PRIVACY_OPTIONS = "settings-privacy-options"
     const val PRIVACY = "settings-privacy"
+    const val LICENCES = "settings-licences"
     const val HEADER = "settings-header"
     const val BUILD = "settings-build"
 }
@@ -96,6 +97,7 @@ fun SettingsScreen(
     onResetBest: () -> Unit,
     onOpenPhosphor: () -> Unit,
     onOpenPrivacyPolicy: () -> Unit,
+    onOpenLicences: () -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
     /** UMP's entry point exists only where UMP says it is required. See `showsPrivacyOptionsRow`. */
@@ -206,6 +208,17 @@ fun SettingsScreen(
                 tag = SettingsTags.PRIVACY,
                 palette = palette,
                 onClick = onOpenPrivacyPolicy,
+            ) {
+                Text(text = "OPEN", style = OpenStyle.tinted(palette))
+            }
+
+            // The bundled JetBrains Mono ships under the SIL OFL, which requires its licence to
+            // travel with it. A file in the repo travels nowhere; this row is where it travels to.
+            SettingRow(
+                label = "LICENCES",
+                tag = SettingsTags.LICENCES,
+                palette = palette,
+                onClick = onOpenLicences,
             ) {
                 Text(text = "OPEN", style = OpenStyle.tinted(palette))
             }

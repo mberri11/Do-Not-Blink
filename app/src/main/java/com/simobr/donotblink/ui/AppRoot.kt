@@ -27,6 +27,7 @@ import com.simobr.donotblink.game.GameViewModel
 import com.simobr.donotblink.game.Phase
 import com.simobr.donotblink.ui.continueoffer.ContinueOfferScreen
 import com.simobr.donotblink.ui.fail.FailScreen
+import com.simobr.donotblink.ui.licences.LicencesScreen
 import com.simobr.donotblink.ui.phosphor.PhosphorScreen
 import com.simobr.donotblink.ui.play.PlayScreen
 import com.simobr.donotblink.ui.roundcard.RoundCardScreen
@@ -54,6 +55,7 @@ sealed interface Screen {
     data object Titles : Screen { override val id = "titles" }
     data object Settings : Screen { override val id = "settings" }
     data object Phosphor : Screen { override val id = "phosphor" }
+    data object Licences : Screen { override val id = "licences" }
 
     companion object {
         fun fromId(id: String): Screen = when (id) {
@@ -65,6 +67,7 @@ sealed interface Screen {
             Titles.id -> Titles
             Settings.id -> Settings
             Phosphor.id -> Phosphor
+            Licences.id -> Licences
             else -> Splash
         }
     }
@@ -131,7 +134,7 @@ fun AppRoot(
                             onOpenTitles = { screen = Screen.Titles },
                             onOpenSettings = { screen = Screen.Settings },
                         )
-                }
+                    }
 
                     Screen.RoundCard -> {
                         val withInterstitial = remember(state.roundId) { viewModel.shouldShowInterstitialNow() }
@@ -198,6 +201,7 @@ fun AppRoot(
                             showPrivacyOptions = showsPrivacyOptionsRow(state.privacyOptionsRequired),
                             onOpenPrivacyOptions = viewModel::showPrivacyOptions,
                             onOpenPrivacyPolicy = { openUrl(context, BuildConfig.PRIVACY_POLICY_URL) },
+                            onOpenLicences = { screen = Screen.Licences },
                             onBack = { screen = Screen.Home },
                         )
                     }
@@ -209,6 +213,8 @@ fun AppRoot(
                         onWatchToUnlock = { id -> viewModel.purchasePhosphor(id) },
                         onBack = { screen = Screen.Settings },
                     )
+
+                    Screen.Licences -> LicencesScreen(onBack = { screen = Screen.Settings })
                 }
             }
         }
