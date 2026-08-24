@@ -2,6 +2,9 @@ package com.simobr.donotblink.ui.continueoffer
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -27,7 +30,11 @@ import com.simobr.donotblink.ui.common.noRippleClickable
 import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbDim
 import com.simobr.donotblink.ui.theme.DnbType
+import com.simobr.donotblink.ui.theme.LocalLayoutScale
 import com.simobr.donotblink.ui.theme.LocalPalette
+import com.simobr.donotblink.ui.theme.LocalRingScale
+import com.simobr.donotblink.ui.theme.scaled
+import com.simobr.donotblink.ui.theme.scaledType
 import com.simobr.donotblink.ui.theme.tinted
 import kotlinx.coroutines.isActive
 
@@ -75,10 +82,21 @@ fun ContinueOfferScreen(
         }
     }
 
-    Box(modifier.fillMaxSize().background(palette.dim.copy(alpha = 0f))) {
+    val scale = LocalLayoutScale.current
+    val ringScale = LocalRingScale.current
+
+    // safeDrawing at the root. On a 360x640 window this screen's WATCH and DECLINE used to sit
+    // below the bottom edge entirely: the player was offered a continue they could neither take
+    // nor refuse. Every offset below now rides the layout scale.
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(palette.dim.copy(alpha = 0f))
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+    ) {
         Canvas(Modifier.fillMaxSize()) {
-            val centre = Offset(size.width / 2f, RING_CENTRE_Y_DP.dp.toPx())
-            val radius = RING_RADIUS_DP.dp.toPx()
+            val centre = Offset(size.width / 2f, (RING_CENTRE_Y_DP * scale).dp.toPx())
+            val radius = (RING_RADIUS_DP * ringScale).dp.toPx()
             val progress = reknit.floatValue
 
             // the dead ring the broken one sits on
@@ -86,10 +104,10 @@ fun ContinueOfferScreen(
 
             // gaps close linearly; the lit dashes take up exactly what the gaps give back
             val closing = floatArrayOf(
-                (REKNIT_DASHES[0] + REKNIT_DASHES[1] * progress).dp.toPx(),
-                (REKNIT_DASHES[1] * (1f - progress)).dp.toPx().coerceAtLeast(0.01f),
-                (REKNIT_DASHES[2] + REKNIT_DASHES[3] * progress).dp.toPx(),
-                (REKNIT_DASHES[3] * (1f - progress)).dp.toPx().coerceAtLeast(0.01f),
+                ((REKNIT_DASHES[0] + REKNIT_DASHES[1] * progress) * ringScale).dp.toPx(),
+                (REKNIT_DASHES[1] * (1f - progress) * ringScale).dp.toPx().coerceAtLeast(0.01f),
+                ((REKNIT_DASHES[2] + REKNIT_DASHES[3] * progress) * ringScale).dp.toPx(),
+                (REKNIT_DASHES[3] * (1f - progress) * ringScale).dp.toPx().coerceAtLeast(0.01f),
             )
             listOf(22f to 0.05f, 6f to 0.16f, 2.4f to 0.9f).forEach { (width, alpha) ->
                 drawCircle(
@@ -109,7 +127,7 @@ fun ContinueOfferScreen(
                 style = Stroke(
                     width = 2.4.dp.toPx(),
                     pathEffect = PathEffect.dashPathEffect(
-                        SEAM_DASHES.map { it.dp.toPx() }.toFloatArray(),
+                        SEAM_DASHES.map { (it * ringScale).dp.toPx() }.toFloatArray(),
                         phase = -circumference * progress,
                     ),
                 ),
@@ -123,29 +141,29 @@ fun ContinueOfferScreen(
                 letterSpacing = 0.45.em,
                 color = DnbColor.LabelMid,
             ),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = BADGE_TOP_DP.dp),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = BADGE_TOP_DP.scaled()),
         )
 
         Text(
             text = streak.toString().padStart(2, '0'),
-            style = DnbType.continueNumeral.tinted(palette),
+            style = DnbType.continueNumeral.tinted(palette).scaledType(),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = STREAK_TOP_DP.dp)
+                .padding(top = STREAK_TOP_DP.scaled())
                 .testTag(ContinueTags.STREAK),
         )
 
         Text(
             text = "STEADY YOUR EYE",
             style = DnbType.ctaLarge.copy(fontSize = 16.sp, color = palette.phosphor),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = HEADLINE_TOP_DP.dp),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = HEADLINE_TOP_DP.scaled()),
         )
 
         Box(
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = WATCH_TOP_DP.dp)
-                .size(width = DnbDim.ctaWidth, height = DnbDim.ctaHeight)
+                .padding(top = WATCH_TOP_DP.scaled())
+                .size(width = DnbDim.ctaWidth.scaled(), height = DnbDim.ctaHeight.scaled())
                 .testTag(ContinueTags.WATCH)
                 .noRippleClickable(onClick = onWatch),
             contentAlignment = Alignment.Center,
@@ -170,7 +188,7 @@ fun ContinueOfferScreen(
             ),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = DECLINE_TOP_DP.dp)
+                .padding(top = DECLINE_TOP_DP.scaled())
                 .testTag(ContinueTags.DECLINE)
                 .noRippleClickable(onClick = onDecline),
         )

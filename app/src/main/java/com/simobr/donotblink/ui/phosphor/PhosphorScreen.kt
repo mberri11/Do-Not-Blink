@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -25,6 +28,7 @@ import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbDim
 import com.simobr.donotblink.ui.theme.DnbType
 import com.simobr.donotblink.ui.theme.LocalPalette
+import com.simobr.donotblink.ui.theme.scaled
 import com.simobr.donotblink.ui.theme.PHOSPHORS
 import com.simobr.donotblink.ui.theme.PhosphorPalette
 import com.simobr.donotblink.ui.theme.tinted
@@ -54,20 +58,20 @@ fun PhosphorScreen(
     val palette = LocalPalette.current
     BackHandler(onBack = onBack)
 
-    Box(modifier.fillMaxSize().background(DnbColor.Black)) {
+    Box(modifier.fillMaxSize().background(DnbColor.Black).windowInsetsPadding(WindowInsets.safeDrawing)) {
         Text(
             text = "PHOSPHOR",
             style = DnbType.sectionTitle.tinted(palette),
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(top = TITLE_TOP_DP.dp, start = DnbDim.screenPadH),
+                .padding(top = TITLE_TOP_DP.scaled(), start = DnbDim.screenPadH),
         )
 
         Column(
             Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(top = ROWS_TOP_DP.dp, start = DnbDim.screenPadH, end = DnbDim.screenPadH),
+                .padding(top = ROWS_TOP_DP.scaled(), start = DnbDim.screenPadH, end = DnbDim.screenPadH),
         ) {
             PHOSPHORS.forEach { entry ->
                 val unlocked = entry.free || entry.id in unlockedIds

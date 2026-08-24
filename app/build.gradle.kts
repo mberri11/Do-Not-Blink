@@ -18,6 +18,39 @@ val TEST_BANNER_UNIT = "ca-app-pub-3940256099942544/6300978111"
 val TEST_INTERSTITIAL_UNIT = "ca-app-pub-3940256099942544/1033173712"
 val TEST_REWARDED_UNIT = "ca-app-pub-3940256099942544/5224354917"
 
+/** A typo in a pasted ID is the commonest way an indie release ships with no fill at all. */
+val APP_ID_SHAPE = Regex("""^ca-app-pub-\d{16}~\d{10}$""")
+val UNIT_ID_SHAPE = Regex("""^ca-app-pub-\d{16}/\d{10}$""")
+
+/**
+ * The five unit IDs a release must carry, as (gradle-visible name, value, the test ID it must not
+ * be). Evaluated at configuration time; VALIDATED at execution time by `verifyReleaseAdIds`, so a
+ * plain `./gradlew test` on a clean checkout is never blocked by a missing credential.
+ */
+val releaseUnitIds: List<Triple<String, String, String>> by lazy {
+    listOf(
+        Triple("ADMOB_UNIT_BANNER", adProperty("ADMOB_UNIT_BANNER"), TEST_BANNER_UNIT),
+        Triple("ADMOB_UNIT_INTERSTITIAL", adProperty("ADMOB_UNIT_INTERSTITIAL"), TEST_INTERSTITIAL_UNIT),
+        Triple("ADMOB_UNIT_REWARDED_CONTINUE", adProperty("ADMOB_UNIT_REWARDED_CONTINUE"), TEST_REWARDED_UNIT),
+        Triple("ADMOB_UNIT_REWARDED_PHOSPHOR", adProperty("ADMOB_UNIT_REWARDED_PHOSPHOR"), TEST_REWARDED_UNIT),
+        Triple("ADMOB_UNIT_REWARDED_TITLES", adProperty("ADMOB_UNIT_REWARDED_TITLES"), TEST_REWARDED_UNIT),
+    )
+}
+
+/**
+ * Release signing. Read through `providers.gradleProperty` so these resolve from
+ * ~/.gradle/gradle.properties — machine-global, outside the repo — and never from a committed file.
+ * A missing one is NOT a fall back to the debug key: it is a failed build, named property first.
+ */
+val signingProperties = listOf(
+    "SIMOBR_KEYSTORE", "SIMOBR_KEYSTORE_PASS", "DNB_KEY_ALIAS", "DNB_KEY_PASS",
+)
+
+fun signingProperty(name: String): String =
+    (providers.gradleProperty(name).orNull ?: "").trim()
+
+val missingSigningProperties: List<String> = signingProperties.filter { signingProperty(it).isEmpty() }
+
 /**
  * The published privacy policy, from gradle.properties. Not a secret — the Play listing shows it
  * to everyone — so it is committed, and the settings row reads it through BuildConfig.
@@ -41,7 +74,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 1
-        versionName = "0.1.0"
+        versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -49,6 +82,20 @@ android {
         buildConfigField("String", "PRIVACY_POLICY_URL", "\"$privacyPolicyUrl\"")
     }
 
+
+    signingConfigs {
+        create("release") {
+            // Configured only when every property is present. When one is missing this config is
+            // left empty and `verifyReleaseSigning` fails the build by name — silently signing a
+            // store upload with the debug key is far worse than not building at all.
+            if (missingSigningProperties.isEmpty()) {
+                storeFile = file(signingProperty("SIMOBR_KEYSTORE"))
+                storePassword = signingProperty("SIMOBR_KEYSTORE_PASS")
+                keyAlias = signingProperty("DNB_KEY_ALIAS")
+                keyPassword = signingProperty("DNB_KEY_PASS")
+            }
+        }
+    }
 
     buildTypes {
         debug {
@@ -63,17 +110,23 @@ android {
             buildConfigField("String", "AD_UNIT_REWARDED_TITLES", "\"$TEST_REWARDED_UNIT\"")
         }
         release {
-            isMinifyEnabled = false
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            if (missingSigningProperties.isEmpty()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
 
             val appId = adProperty("ADMOB_APP_ID")
-            if (appId.isEmpty()) {
-                logger.warn("RELEASE: ADMOB_APP_ID missing from local.properties — ads will not serve.")
-            }
-            manifestPlaceholders["admobAppId"] = appId.ifEmpty { TEST_APP_ID }
+            // NOT `.ifEmpty { TEST_APP_ID }`. A forgotten local.properties used to produce a
+            // perfectly valid, uploadable AAB carrying Google's public test App ID — an
+            // invalid-traffic incident waiting to happen. The placeholder below is deliberately
+            // not an ad ID at all, and `verifyReleaseAdIds` blocks packaging long before it could
+            // reach a device.
+            manifestPlaceholders["admobAppId"] = appId.ifEmpty { "ADMOB_APP_ID_MISSING" }
             buildConfigField("String", "AD_UNIT_BANNER", "\"${adProperty("ADMOB_UNIT_BANNER")}\"")
             buildConfigField("String", "AD_UNIT_INTERSTITIAL", "\"${adProperty("ADMOB_UNIT_INTERSTITIAL")}\"")
             buildConfigField("String", "AD_UNIT_REWARDED_CONTINUE", "\"${adProperty("ADMOB_UNIT_REWARDED_CONTINUE")}\"")
@@ -98,6 +151,77 @@ kotlin {
     compilerOptions {
         jvmTarget.set(JvmTarget.JVM_17)
     }
+}
+
+// ---- release guards -----------------------------------------------------------------------------
+//
+// Both tasks fail LOUDLY and both run only when a release artifact is actually being packaged.
+// They are wired to the packaging tasks rather than to `preReleaseBuild`, because the latter is in
+// the graph of `./gradlew test` and a clean checkout with no credentials must still run its tests.
+
+val verifyReleaseAdIds = tasks.register("verifyReleaseAdIds") {
+    group = "verification"
+    description = "Fails the release build unless every AdMob ID is present, well-formed and not a test ID."
+    doLast {
+        val problems = mutableListOf<String>()
+
+        val appId = adProperty("ADMOB_APP_ID")
+        when {
+            appId.isEmpty() -> problems += "ADMOB_APP_ID is missing"
+            appId == TEST_APP_ID -> problems += "ADMOB_APP_ID is Google's public TEST App ID"
+            !APP_ID_SHAPE.matches(appId) ->
+                problems += "ADMOB_APP_ID '$appId' is malformed (expected ca-app-pub-<16 digits>~<10 digits>)"
+        }
+
+        releaseUnitIds.forEach { (name, value, testValue) ->
+            when {
+                value.isEmpty() -> problems += "$name is missing"
+                value == testValue -> problems += "$name is a Google TEST ad unit ID"
+                !UNIT_ID_SHAPE.matches(value) ->
+                    problems += "$name '$value' is malformed (expected ca-app-pub-<16 digits>/<10 digits>)"
+            }
+        }
+
+        if (problems.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("Refusing to package a release build with these AdMob problems:")
+                    problems.forEach { appendLine("  - $it") }
+                    appendLine()
+                    appendLine("All six live in local.properties at the repo root (git-ignored):")
+                    appendLine("  ADMOB_APP_ID=ca-app-pub-XXXXXXXXXXXXXXXX~YYYYYYYYYY")
+                    releaseUnitIds.forEach { (name, _, _) ->
+                        appendLine("  $name=ca-app-pub-XXXXXXXXXXXXXXXX/YYYYYYYYYY")
+                    }
+                }.trim()
+            )
+        }
+    }
+}
+
+val verifyReleaseSigning = tasks.register("verifyReleaseSigning") {
+    group = "verification"
+    description = "Fails the release build unless the upload key is configured. Never falls back to debug."
+    doLast {
+        if (missingSigningProperties.isNotEmpty()) {
+            throw GradleException(
+                buildString {
+                    appendLine("Refusing to package an unsigned release. Missing:")
+                    missingSigningProperties.forEach { appendLine("  - $it") }
+                    appendLine()
+                    appendLine("These belong in ~/.gradle/gradle.properties — machine-global, never committed.")
+                }.trim()
+            )
+        }
+        val keystore = file(signingProperty("SIMOBR_KEYSTORE"))
+        if (!keystore.isFile) {
+            throw GradleException("SIMOBR_KEYSTORE points at ${keystore.absolutePath}, which is not a file.")
+        }
+    }
+}
+
+tasks.matching { it.name == "packageRelease" || it.name == "packageReleaseBundle" }.configureEach {
+    dependsOn(verifyReleaseAdIds, verifyReleaseSigning)
 }
 
 dependencies {

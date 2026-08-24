@@ -45,4 +45,19 @@ object ConsentGate {
         UserMessagingPlatform.getConsentInformation(activity).privacyOptionsRequirementStatus ==
             ConsentInformation.PrivacyOptionsRequirementStatus.REQUIRED
     }.getOrDefault(false)
+
+    /**
+     * Reopens the consent form from SETTINGS.
+     *
+     * Google's EU user consent policy requires an app that showed a consent form to offer a way
+     * back into it. Having [privacyOptionsRequired] and never calling this was a live compliance
+     * gap, not a missing nicety: it is an enforcement surface for the whole ads account.
+     *
+     * A form error is not the game's problem — [onDone] fires either way.
+     */
+    fun showPrivacyOptions(activity: Activity, onDone: () -> Unit = {}) {
+        runCatching {
+            UserMessagingPlatform.showPrivacyOptionsForm(activity) { onDone() }
+        }.onFailure { onDone() }
+    }
 }

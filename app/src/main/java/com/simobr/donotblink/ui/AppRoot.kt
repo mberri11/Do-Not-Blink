@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.simobr.donotblink.BuildConfig
+import com.simobr.donotblink.ads.showsPrivacyOptionsRow
 import com.simobr.donotblink.game.GameViewModel
 import com.simobr.donotblink.game.Phase
 import com.simobr.donotblink.ui.continueoffer.ContinueOfferScreen
@@ -33,6 +34,7 @@ import com.simobr.donotblink.ui.settings.SettingsScreen
 import com.simobr.donotblink.ui.splash.SplashScreen
 import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.LocalPalette
+import com.simobr.donotblink.ui.theme.ScaledLayout
 import com.simobr.donotblink.ui.theme.phosphorById
 import com.simobr.donotblink.ui.titles.TitlesScreen
 
@@ -91,115 +93,123 @@ fun AppRoot(
     }
 
     CompositionLocalProvider(LocalPalette provides palette) {
+        // The window is measured ONCE, here, and every screen inside reads the factor it produced.
+        // Nothing below this point knows how big the device is.
         Box(modifier.fillMaxSize().background(DnbColor.Black)) {
-            when (screen) {
-                Screen.Splash -> SplashScreen(
-                    onFinished = { screen = Screen.Home },
-                    // Consent, then initialize, then preload. The work belongs to the view model;
-                    // the splash only waits for it, and only up to its own ceiling.
-                    startupWork = {
-                        activity?.let { viewModel.beginAdStartup(it) }
-                        viewModel.awaitAdStartup()
-                    },
-                )
-
-                // ONE call site for Home and Play. They are not two screens: Home is the idle face
-                // of the play surface. Two branches meant the press that starts a round disposed
-                // the very node handling it — the gesture was cancelled mid-hold and the first
-                // round of every session was unwinnable. Here `screen` only flips `homeChrome`,
-                // which is a plain recomposition: the Canvas, its pointerInput keys and the
-                // running gesture coroutine all survive, so the hold that began on Home is the
-                // hold that gets judged.
-                Screen.Home, Screen.Play -> {
-                    // Back leaves a run; on Home it is the system's to handle, so it is disabled
-                    // rather than conditionally registered — an unconditional call site keeps the
-                    // composition structure identical either side of the flip.
-                    BackHandler(enabled = screen == Screen.Play) {
-                        viewModel.startNewRun()
-                        screen = Screen.Home
-                    }
-                    PlayScreen(
-                        viewModel = viewModel,
-                        homeChrome = screen == Screen.Home,
-                        onRoundStarted = { screen = Screen.Play },
-                        onFailed = { screen = afterFail(viewModel) },
-                        onOpenTitles = { screen = Screen.Titles },
-                        onOpenSettings = { screen = Screen.Settings },
+            ScaledLayout {
+                when (screen) {
+                    Screen.Splash -> SplashScreen(
+                        onFinished = { screen = Screen.Home },
+                        // Consent, then initialize, then preload. The work belongs to the view model;
+                        // the splash only waits for it, and only up to its own ceiling.
+                        startupWork = {
+                            activity?.let { viewModel.beginAdStartup(it) }
+                            viewModel.awaitAdStartup()
+                        },
                     )
-                }
 
-                Screen.RoundCard -> {
-                    val withInterstitial = remember(state.roundId) { viewModel.shouldShowInterstitialNow() }
-                    RoundCardScreen(
-                        roundNumber = state.lifetimeRuns + 1,
-                        runsTowardInterstitial = if (withInterstitial) 3 else state.lifetimeRuns % 3,
-                        withInterstitial = withInterstitial,
-                        showInterstitial = { onFinished -> viewModel.showInterstitial(onFinished) },
-                        onFinished = { screen = Screen.Play },
-                    )
-                }
-
-                Screen.ContinueOffer -> {
-                    // The outcome arrives asynchronously from the SDK; the phase is what decides.
-                    LaunchedEffect(state.phase) {
-                        when (state.phase) {
-                            Phase.Idle -> screen = Screen.Play
-                            Phase.Failed -> screen = Screen.Fail
-                            else -> Unit
+                    // ONE call site for Home and Play. They are not two screens: Home is the idle face
+                    // of the play surface. Two branches meant the press that starts a round disposed
+                    // the very node handling it — the gesture was cancelled mid-hold and the first
+                    // round of every session was unwinnable. Here `screen` only flips `homeChrome`,
+                    // which is a plain recomposition: the Canvas, its pointerInput keys and the
+                    // running gesture coroutine all survive, so the hold that began on Home is the
+                    // hold that gets judged.
+                    Screen.Home, Screen.Play -> {
+                        // Back leaves a run; on Home it is the system's to handle, so it is disabled
+                        // rather than conditionally registered — an unconditional call site keeps the
+                        // composition structure identical either side of the flip.
+                        BackHandler(enabled = screen == Screen.Play) {
+                            viewModel.startNewRun()
+                            screen = Screen.Home
                         }
+                        PlayScreen(
+                            viewModel = viewModel,
+                            homeChrome = screen == Screen.Home,
+                            onRoundStarted = { screen = Screen.Play },
+                            onFailed = { screen = afterFail(viewModel) },
+                            onOpenTitles = { screen = Screen.Titles },
+                            onOpenSettings = { screen = Screen.Settings },
+                        )
+                }
+
+                    Screen.RoundCard -> {
+                        val withInterstitial = remember(state.roundId) { viewModel.shouldShowInterstitialNow() }
+                        RoundCardScreen(
+                            roundNumber = state.lifetimeRuns + 1,
+                            runsTowardInterstitial = if (withInterstitial) 3 else state.lifetimeRuns % 3,
+                            withInterstitial = withInterstitial,
+                            showInterstitial = { onFinished -> viewModel.showInterstitial(onFinished) },
+                            onFinished = { screen = Screen.Play },
+                        )
                     }
-                    ContinueOfferScreen(
+
+                    Screen.ContinueOffer -> {
+                        // The outcome arrives asynchronously from the SDK; the phase is what decides.
+                        LaunchedEffect(state.phase) {
+                            when (state.phase) {
+                                Phase.Idle -> screen = Screen.Play
+                                Phase.Failed -> screen = Screen.Fail
+                                else -> Unit
+                            }
+                        }
+                        ContinueOfferScreen(
+                            streak = state.lastRunStreak,
+                            onWatch = viewModel::acceptContinue,
+                            onDecline = viewModel::declineContinue,
+                        )
+                    }
+
+                    Screen.Fail -> FailScreen(
                         streak = state.lastRunStreak,
-                        onWatch = viewModel::acceptContinue,
-                        onDecline = viewModel::declineContinue,
+                        best = state.best,
+                        newlyUnlocked = state.newlyUnlockedTitles,
+                        bannerEnabled = viewModel.adsEnabled,
+                        onAgain = {
+                            viewModel.startNewRun()
+                            screen = Screen.RoundCard
+                        },
+                        onHome = {
+                            viewModel.startNewRun()
+                            screen = Screen.Home
+                        },
                     )
-                }
 
-                Screen.Fail -> FailScreen(
-                    streak = state.lastRunStreak,
-                    best = state.best,
-                    newlyUnlocked = state.newlyUnlockedTitles,
-                    bannerEnabled = viewModel.adsEnabled,
-                    onAgain = {
-                        viewModel.startNewRun()
-                        screen = Screen.RoundCard
-                    },
-                    onHome = {
-                        viewModel.startNewRun()
-                        screen = Screen.Home
-                    },
-                )
-
-                Screen.Titles -> TitlesScreen(
-                    bestStreak = state.best,
-                    revealLockedNames = state.titlesRevealed,
-                    onBack = { screen = Screen.Home },
-                    onWatchToReveal = { viewModel.purchaseTitleReveal() },
-                )
-
-                Screen.Settings -> {
-                    val context = LocalContext.current
-                    SettingsScreen(
-                        hapticsEnabled = state.hapticsEnabled,
-                        soundEnabled = state.soundEnabled,
+                    Screen.Titles -> TitlesScreen(
                         bestStreak = state.best,
-                        phosphorLabel = palette.label,
-                        onSetHaptics = viewModel::setHaptics,
-                        onSetSound = viewModel::setSound,
-                        onResetBest = viewModel::resetBest,
-                        onOpenPhosphor = { screen = Screen.Phosphor },
-                        onOpenPrivacyPolicy = { openUrl(context, BuildConfig.PRIVACY_POLICY_URL) },
+                        revealLockedNames = state.titlesRevealed,
                         onBack = { screen = Screen.Home },
+                        onWatchToReveal = { viewModel.purchaseTitleReveal() },
+                    )
+
+                    Screen.Settings -> {
+                        val context = LocalContext.current
+                        SettingsScreen(
+                            hapticsEnabled = state.hapticsEnabled,
+                            soundEnabled = state.soundEnabled,
+                            bestStreak = state.best,
+                            phosphorLabel = palette.label,
+                            onSetHaptics = viewModel::setHaptics,
+                            onSetSound = viewModel::setSound,
+                            onResetBest = viewModel::resetBest,
+                            onOpenPhosphor = { screen = Screen.Phosphor },
+                            // UMP's entry point. The row does not exist outside the EEA, which is
+                            // correct: a row that opens nothing is worse than no row.
+                            showPrivacyOptions = showsPrivacyOptionsRow(state.privacyOptionsRequired),
+                            onOpenPrivacyOptions = viewModel::showPrivacyOptions,
+                            onOpenPrivacyPolicy = { openUrl(context, BuildConfig.PRIVACY_POLICY_URL) },
+                            onBack = { screen = Screen.Home },
+                        )
+                    }
+
+                    Screen.Phosphor -> PhosphorScreen(
+                        selectedId = state.selectedPhosphorId,
+                        unlockedIds = state.unlockedPaletteIds,
+                        onSelect = viewModel::selectPhosphor,
+                        onWatchToUnlock = { id -> viewModel.purchasePhosphor(id) },
+                        onBack = { screen = Screen.Settings },
                     )
                 }
-
-                Screen.Phosphor -> PhosphorScreen(
-                    selectedId = state.selectedPhosphorId,
-                    unlockedIds = state.unlockedPaletteIds,
-                    onSelect = viewModel::selectPhosphor,
-                    onWatchToUnlock = { id -> viewModel.purchasePhosphor(id) },
-                    onBack = { screen = Screen.Settings },
-                )
             }
         }
     }

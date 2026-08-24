@@ -12,12 +12,16 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.simobr.donotblink.ui.brand.EyeMark
 import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbType
+import com.simobr.donotblink.ui.theme.scaled
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
@@ -71,18 +75,21 @@ fun SplashScreen(
     }
 
     Box(
-        modifier = modifier.fillMaxSize().background(DnbColor.Black),
+        modifier = modifier
+            .fillMaxSize()
+            .background(DnbColor.Black)
+            .windowInsetsPadding(WindowInsets.safeDrawing),
         contentAlignment = Alignment.Center,
     ) {
         EyeMark(
-            size = MARK_SIZE_DP.dp,
+            size = MARK_SIZE_DP.scaled(),
             arcSweep = { sweep.floatValue },
             bloomAlpha = { sweep.floatValue },
         )
         Text(
             text = "DO NOT BLINK",
             style = DnbType.wordmark,
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = WORDMARK_TOP_DP.dp),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = WORDMARK_TOP_DP.scaled()),
         )
     }
 }

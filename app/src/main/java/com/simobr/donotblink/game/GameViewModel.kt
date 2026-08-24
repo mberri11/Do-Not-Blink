@@ -73,6 +73,8 @@ data class PlayState(
     val selectedPhosphorId: String,
     val unlockedPaletteIds: Set<String>,
     val lifetimeRuns: Int,
+    /** UMP: this user must be offered a way back into the consent form. EEA/UK only. */
+    val privacyOptionsRequired: Boolean,
 )
 
 sealed interface GameEvent {
@@ -109,6 +111,7 @@ class GameViewModel(
             selectedPhosphorId = "",
             unlockedPaletteIds = emptySet(),
             lifetimeRuns = 0,
+            privacyOptionsRequired = false,
         )
     )
     val state: StateFlow<PlayState> = _state.asStateFlow()
@@ -375,6 +378,10 @@ class GameViewModel(
         adStartupBegun = true
         viewModelScope.launch {
             runCatching { adHost.start(activity) }
+            // Asked once, here: UMP has nothing to say before the consent round trip has run, and
+            // the answer cannot change again inside a session.
+            val required = runCatching { adHost.isPrivacyOptionsRequired() }.getOrDefault(false)
+            _state.update { it.copy(privacyOptionsRequired = required) }
             _adStartupDone.value = true
         }
     }
@@ -382,6 +389,9 @@ class GameViewModel(
     suspend fun awaitAdStartup() {
         _adStartupDone.first { it }
     }
+
+    /** SETTINGS -> PRIVACY OPTIONS. Reopens the UMP form; nothing about the game changes. */
+    fun showPrivacyOptions() = adHost.showPrivacyOptions()
 
     fun selectPhosphor(id: String) {
         viewModelScope.launch { store.setSelectedPhosphorId(id) }

@@ -114,6 +114,24 @@ class AdMobHost(
             .onFailure { settle(RewardedOutcome.Unavailable) }
     }
 
+    /**
+     * Asked once after startup, from the attached Activity. UMP needs an Activity context and
+     * there is nothing to ask before [start] has run its consent round trip.
+     */
+    override fun isPrivacyOptionsRequired(): Boolean {
+        val activity = this.activity ?: return false
+        return ConsentGate.privacyOptionsRequired(activity)
+    }
+
+    override fun showPrivacyOptions(onDone: () -> Unit) {
+        val activity = this.activity
+        if (activity == null) {
+            onDone()
+            return
+        }
+        ConsentGate.showPrivacyOptions(activity, onDone)
+    }
+
     override fun isInterstitialReady(): Boolean = adsEnabled && interstitial?.isReady == true
 
     override fun showInterstitial(onFinished: () -> Unit) {

@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  THEMED ICON layer (Android 13+, "Themed icons" setting).
+
+  The system reads ONLY the alpha channel of this drawable and repaints it in the wallpaper's
+  tint. Pointing <monochrome> at ic_launcher_foreground is therefore wrong: that drawable fills
+  the eyelid (#0A0700), the iris and the pupil with opaque paint, so every one of those fills
+  becomes solid tint and the themed icon renders as a featureless almond blob.
+
+  This layer is the same mark drawn as a SILHOUETTE: strokes only, one opaque colour, a solid
+  pupil, and no gradients or glow — the negative space is what makes it legible at 48dp.
+  Strokes are deliberately heavier than the colour foreground's, because a 4-unit hairline
+  disappears once the launcher downsamples 108dp to a 48dp raster.
+
+  Same viewport and same 0.66 group scale as ic_launcher_foreground, so the two layers sit at
+  identical size and the icon does not jump when the user toggles themed icons on.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="512"
+    android:viewportHeight="512">
+
+    <group
+        android:pivotX="256"
+        android:pivotY="256"
+        android:scaleX="0.66"
+        android:scaleY="0.66">
+
+        <!-- outer ring -->
+        <path
+            android:pathData="M44,256a212,212 0 1,0 424,0a212,212 0 1,0 -424,0"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="20" />
+
+        <!-- eyelid -->
+        <path
+            android:pathData="M92,256 Q256,118 420,256 Q256,394 92,256 Z"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="24"
+            android:strokeLineJoin="round" />
+
+        <!-- iris -->
+        <path
+            android:pathData="M190,256a66,66 0 1,0 132,0a66,66 0 1,0 -132,0"
+            android:strokeColor="#FF000000"
+            android:strokeWidth="16" />
+
+        <!-- pupil -->
+        <path
+            android:pathData="M230,256a26,26 0 1,0 52,0a26,26 0 1,0 -52,0"
+            android:fillColor="#FF000000" />
+    </group>
+</vector>

@@ -36,6 +36,12 @@ interface AdHost {
     fun isInterstitialReady(): Boolean
     fun showInterstitial(onFinished: () -> Unit)
 
+    /** UMP: whether this user must be offered a way back into the consent form. */
+    fun isPrivacyOptionsRequired(): Boolean = false
+
+    /** UMP: reopen the consent form. Always calls back, even when there is no form to show. */
+    fun showPrivacyOptions(onDone: () -> Unit = {}) = onDone()
+
     companion object {
         /** The default everywhere: an app with no ads in it at all. */
         val None: AdHost = object : AdHost {

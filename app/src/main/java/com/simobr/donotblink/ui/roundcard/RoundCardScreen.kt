@@ -13,6 +13,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -24,7 +27,11 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbType
+import com.simobr.donotblink.ui.theme.LocalLayoutScale
 import com.simobr.donotblink.ui.theme.LocalPalette
+import com.simobr.donotblink.ui.theme.LocalRingScale
+import com.simobr.donotblink.ui.theme.scaled
+import com.simobr.donotblink.ui.theme.scaledType
 import com.simobr.donotblink.ui.theme.tinted
 import kotlinx.coroutines.delay
 
@@ -75,10 +82,13 @@ fun RoundCardScreen(
         }
     }
 
-    Box(modifier.fillMaxSize()) {
+    val scale = LocalLayoutScale.current
+    val ringScale = LocalRingScale.current
+
+    Box(modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         Canvas(Modifier.fillMaxSize()) {
-            val radius = GLOW_RADIUS_DP.dp.toPx()
-            val centre = Offset(size.width / 2f, GLOW_CENTRE_Y_DP.dp.toPx())
+            val radius = (GLOW_RADIUS_DP * ringScale).dp.toPx()
+            val centre = Offset(size.width / 2f, (GLOW_CENTRE_Y_DP * scale).dp.toPx())
             drawCircle(
                 brush = Brush.radialGradient(
                     0f to palette.phosphor.copy(alpha = 0.10f),
@@ -94,19 +104,19 @@ fun RoundCardScreen(
         Text(
             text = "ROUND",
             style = DnbType.microLabel.copy(letterSpacing = 0.5.em, color = DnbColor.LabelMid),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = LABEL_TOP_DP.dp),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = LABEL_TOP_DP.scaled()),
         )
         Text(
             text = roundNumber.toString().padStart(2, '0'),
-            style = DnbType.roundNumeral.tinted(palette),
+            style = DnbType.roundNumeral.tinted(palette).scaledType(),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = NUMERAL_TOP_DP.dp)
+                .padding(top = NUMERAL_TOP_DP.scaled())
                 .testTag(RoundCardTags.ROUND),
         )
 
         Row(
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = TICKS_TOP_DP.dp),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = TICKS_TOP_DP.scaled()),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             repeat(3) { index ->

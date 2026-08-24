@@ -7,7 +7,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -28,6 +30,7 @@ import com.simobr.donotblink.ui.theme.DnbDim
 import com.simobr.donotblink.ui.common.noRippleClickable
 import com.simobr.donotblink.ui.theme.DnbType
 import com.simobr.donotblink.ui.theme.LocalPalette
+import com.simobr.donotblink.ui.theme.scaled
 import com.simobr.donotblink.ui.theme.PhosphorPalette
 import com.simobr.donotblink.ui.theme.tinted
 
@@ -35,6 +38,7 @@ object TitlesTags {
     const val LIST = "titles-list"
     const val COUNT = "titles-count"
     const val REVEAL = "titles-reveal"
+    const val HEADER = "titles-header"
 }
 
 /**
@@ -68,12 +72,13 @@ fun TitlesScreen(
     val palette = LocalPalette.current
     BackHandler(onBack = onBack)
 
-    Box(modifier.fillMaxSize().background(DnbColor.Black)) {
+    Box(modifier.fillMaxSize().background(DnbColor.Black).windowInsetsPadding(WindowInsets.safeDrawing)) {
         Box(
             Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(top = HEADER_TOP_DP.dp, start = DnbDim.screenPadH, end = DnbDim.screenPadH)
+                .padding(top = HEADER_TOP_DP.scaled(), start = DnbDim.screenPadH, end = DnbDim.screenPadH)
+                .testTag(TitlesTags.HEADER)
         ) {
             Text("TITLES", style = DnbType.sectionTitle.tinted(palette), modifier = Modifier.align(Alignment.CenterStart))
             Text(
@@ -87,8 +92,8 @@ fun TitlesScreen(
             Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(top = LIST_TOP_DP.dp, start = DnbDim.screenPadH, end = DnbDim.screenPadH)
-                .navigationBarsPadding()
+                // No navigationBarsPadding: the root Box already consumed safeDrawing.
+                .padding(top = LIST_TOP_DP.scaled(), start = DnbDim.screenPadH, end = DnbDim.screenPadH)
                 .verticalScroll(rememberScrollState())
                 .testTag(TitlesTags.LIST),
         ) {

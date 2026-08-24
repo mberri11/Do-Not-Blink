@@ -11,8 +11,10 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -34,6 +36,7 @@ import com.simobr.donotblink.ui.theme.DnbDim
 import com.simobr.donotblink.ui.theme.DnbType
 import com.simobr.donotblink.ui.theme.LocalPalette
 import com.simobr.donotblink.ui.theme.PhosphorPalette
+import com.simobr.donotblink.ui.theme.scaled
 import com.simobr.donotblink.ui.theme.tinted
 
 object SettingsTags {
@@ -43,7 +46,9 @@ object SettingsTags {
     const val RESET_YES = "settings-reset-yes"
     const val RESET_NO = "settings-reset-no"
     const val PHOSPHOR = "settings-phosphor"
+    const val PRIVACY_OPTIONS = "settings-privacy-options"
     const val PRIVACY = "settings-privacy"
+    const val HEADER = "settings-header"
     const val BUILD = "settings-build"
 }
 
@@ -93,25 +98,36 @@ fun SettingsScreen(
     onOpenPrivacyPolicy: () -> Unit,
     onBack: () -> Unit,
     modifier: Modifier = Modifier,
+    /** UMP's entry point exists only where UMP says it is required. See `showsPrivacyOptionsRow`. */
+    showPrivacyOptions: Boolean = false,
+    onOpenPrivacyOptions: () -> Unit = {},
 ) {
     val palette = LocalPalette.current
     BackHandler(onBack = onBack)
     var confirmingReset by remember { mutableStateOf(false) }
 
-    Box(modifier.fillMaxSize().background(DnbColor.Black)) {
+    // safeDrawing, not navigationBars: the header used to slide under a tall status bar or a
+    // display cutout, because nothing in this app consumed the TOP inset.
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(DnbColor.Black)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+    ) {
         Text(
             text = "SETTINGS",
             style = DnbType.sectionTitle.tinted(palette),
             modifier = Modifier
                 .align(Alignment.TopStart)
-                .padding(top = TITLE_TOP_DP.dp, start = DnbDim.screenPadH),
+                .padding(top = TITLE_TOP_DP.scaled(), start = DnbDim.screenPadH)
+                .testTag(SettingsTags.HEADER),
         )
 
         Column(
             Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
-                .padding(top = ROWS_TOP_DP.dp, start = DnbDim.screenPadH, end = DnbDim.screenPadH),
+                .padding(top = ROWS_TOP_DP.scaled(), start = DnbDim.screenPadH, end = DnbDim.screenPadH),
         ) {
             SettingRow(
                 label = "HAPTICS",
@@ -173,6 +189,18 @@ fun SettingsScreen(
                 Text(text = phosphorLabel, style = ValueQuietStyle.tinted(palette))
             }
 
+            // Between PHOSPHOR and PRIVACY POLICY, and only where UMP requires it.
+            if (showPrivacyOptions) {
+                SettingRow(
+                    label = "PRIVACY OPTIONS",
+                    tag = SettingsTags.PRIVACY_OPTIONS,
+                    palette = palette,
+                    onClick = onOpenPrivacyOptions,
+                ) {
+                    Text(text = "OPEN", style = OpenStyle.tinted(palette))
+                }
+            }
+
             SettingRow(
                 label = "PRIVACY POLICY",
                 tag = SettingsTags.PRIVACY,
@@ -188,8 +216,9 @@ fun SettingsScreen(
             style = BuildStyle.tinted(palette),
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .navigationBarsPadding()
-                .padding(start = DnbDim.screenPadH, bottom = BUILD_BOTTOM_DP.dp)
+                // No navigationBarsPadding: the root Box already consumed safeDrawing, and
+                // consuming the bottom inset twice double-pads it.
+                .padding(start = DnbDim.screenPadH, bottom = BUILD_BOTTOM_DP.scaled())
                 .testTag(SettingsTags.BUILD),
         )
     }

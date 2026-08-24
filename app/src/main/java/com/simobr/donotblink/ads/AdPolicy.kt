@@ -61,3 +61,12 @@ fun shouldOfferContinue(
 
     else -> streak >= CONTINUE_MIN_STREAK && streak >= bestStreak - CONTINUE_BEST_MARGIN
 }
+
+/**
+ * Whether SETTINGS shows the PRIVACY OPTIONS row.
+ *
+ * UMP reports REQUIRED for every user who has been through a consent form — in practice the EEA
+ * and the UK. Outside that, there is no form to reopen and the row must not exist at all: a row
+ * labelled OPEN that opens nothing is worse than no row.
+ */
+fun showsPrivacyOptionsRow(privacyOptionsRequired: Boolean): Boolean = privacyOptionsRequired

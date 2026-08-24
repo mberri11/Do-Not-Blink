@@ -227,4 +227,19 @@ class AdPolicyTest {
         onPointerDown(clock.now)
         onPointerUp(clock.advance((plan.perfectElapsedMs - plan.halfWindowMs - 5f).roundToLong()))
     }
+
+    // ---- the UMP privacy-options entry point (Stage 6, item 4) --------------------------------
+
+    /**
+     * `privacyOptionsRequired()` existed since Stage 5 and was called from nowhere, and
+     * `showPrivacyOptionsForm` was never called at all. An app that showed a consent form and
+     * offers no way back into it is out of compliance with Google's EU user consent policy — a
+     * live enforcement surface for the whole ads account, not a missing nicety.
+     */
+    @Test
+    fun the_privacy_options_row_exists_exactly_where_ump_says_it_is_required() {
+        assertTrue(showsPrivacyOptionsRow(privacyOptionsRequired = true))
+        assertFalse(showsPrivacyOptionsRow(privacyOptionsRequired = false))
+    }
+
 }

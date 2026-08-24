@@ -7,8 +7,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.paddingFromBaseline
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.FloatState
@@ -31,6 +35,7 @@ import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -44,8 +49,12 @@ import com.simobr.donotblink.game.Teaching
 import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbDim
 import com.simobr.donotblink.ui.theme.DnbType
+import com.simobr.donotblink.ui.theme.LocalLayoutScale
 import com.simobr.donotblink.ui.theme.LocalPalette
+import com.simobr.donotblink.ui.theme.LocalRingScale
 import com.simobr.donotblink.ui.theme.PhosphorPalette
+import com.simobr.donotblink.ui.theme.scaled
+import com.simobr.donotblink.ui.theme.scaledType
 import com.simobr.donotblink.ui.theme.tinted
 import com.simobr.donotblink.ui.home.HomeChrome
 import kotlinx.coroutines.delay
@@ -82,8 +91,8 @@ private const val SHOCK_TRAVEL_DP = 32f
 private const val STREAK_TOP_DP = 88f
 private const val STREAK_GAP_DP = 16f
 
-/** The teaching line's baseline, 120dp below the ring centre. */
-private val RULE_BASELINE_FROM_TOP = DnbDim.ringCentreYFromTop + 120.dp
+/** The teaching line's baseline, 120dp below the ring centre, before scaling. */
+private const val RULE_BASELINE_FROM_TOP = 430f + 120f
 
 /** How long the dead ring is left standing before the fail screen replaces it. */
 const val FAIL_DWELL_MS = 450L
@@ -190,6 +199,15 @@ fun PlayScreen(
         if (state.phase != Phase.Holding || !state.soundEnabled) feedback.stopHold()
     }
 
+    val scale = LocalLayoutScale.current
+    val ringScale = LocalRingScale.current
+
+    // The play surface is the ONE screen that must keep filling the whole window: the press can
+    // land anywhere, including under the status bar. So the Canvas draws edge to edge and takes no
+    // insets, and the ring is offset by the top inset by hand so that it shares a coordinate space
+    // with the chrome, which IS inset-padded.
+    val topInset = WindowInsets.safeDrawing.asPaddingValues().calculateTopPadding()
+
     Box(modifier.fillMaxSize()) {
         Canvas(
             modifier = Modifier
@@ -207,10 +225,14 @@ fun PlayScreen(
                     flash = flash.floatValue,
                     shock = shock.floatValue,
                     ringHidden = ringHidden.value,
+                    scale = scale,
+                    ringScale = ringScale,
+                    topInset = topInset,
                 )
             }
         }
 
+        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing)) {
         if (homeChrome) {
             HomeChrome(
                 best = state.best,
@@ -233,10 +255,11 @@ fun PlayScreen(
                     style = RuleLineStyle,
                     modifier = Modifier
                         .align(Alignment.TopCenter)
-                        .paddingFromBaseline(top = RULE_BASELINE_FROM_TOP)
+                        .paddingFromBaseline(top = RULE_BASELINE_FROM_TOP.scaled())
                         .testTag(PlayScreenTags.RULE),
                 )
             }
+        }
         }
     }
 }
@@ -291,7 +314,7 @@ private fun StreakBlock(
     modifier: Modifier = Modifier,
 ) {
     Column(
-        modifier = modifier.fillMaxWidth().padding(top = STREAK_TOP_DP.dp),
+        modifier = modifier.fillMaxWidth().padding(top = STREAK_TOP_DP.scaled()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(STREAK_GAP_DP.dp),
     ) {
@@ -299,7 +322,8 @@ private fun StreakBlock(
         Text(
             text = streak.toString().padStart(2, '0'),
             style = (if (phase == Phase.Perfect) DnbType.streakPerfect else DnbType.streakLive)
-                .tinted(palette),
+                .tinted(palette)
+                .scaledType(),
             modifier = Modifier
                 .testTag(PlayScreenTags.STREAK)
                 .graphicsLayer {
@@ -319,20 +343,29 @@ private fun DrawScope.drawRound(
     flash: Float,
     shock: Float,
     ringHidden: Boolean,
+    scale: Float,
+    ringScale: Float,
+    topInset: Dp,
 ) {
-    val centre = Offset(size.width / 2f, DnbDim.ringCentreYFromTop.toPx())
+    // The ring's radii ride ringScale, which is bounded by the SMALLER axis: a circle that scaled
+    // with height alone would run off the sides of a tall narrow window. Its centre rides the
+    // layout scale plus the top inset, so it agrees with the inset-padded chrome above it.
+    val centre = Offset(
+        size.width / 2f,
+        topInset.toPx() + (DnbDim.ringCentreYFromTop.value * scale).dp.toPx(),
+    )
 
     // 1. dim outer track
     drawCircle(
         color = palette.dim,
-        radius = OUTER_TRACK_DP.dp.toPx(),
+        radius = (OUTER_TRACK_DP * ringScale).dp.toPx(),
         center = centre,
         style = Stroke(width = 1.dp.toPx()),
     )
 
     // 2. tick marks at N/E/S/W
-    val tickInner = TICK_INNER_DP.dp.toPx()
-    val tickOuter = TICK_OUTER_DP.dp.toPx()
+    val tickInner = (TICK_INNER_DP * ringScale).dp.toPx()
+    val tickOuter = (TICK_OUTER_DP * ringScale).dp.toPx()
     val tickWidth = 1.6.dp.toPx()
     drawLine(palette.dim, Offset(centre.x, centre.y - tickOuter), Offset(centre.x, centre.y - tickInner), tickWidth)
     drawLine(palette.dim, Offset(centre.x, centre.y + tickInner), Offset(centre.x, centre.y + tickOuter), tickWidth)
@@ -342,7 +375,7 @@ private fun DrawScope.drawRound(
     // 3. target line
     drawCircle(
         color = palette.phosphor.copy(alpha = 0.7f),
-        radius = plan.targetRadiusDp.dp.toPx(),
+        radius = (plan.targetRadiusDp * ringScale).dp.toPx(),
         center = centre,
         style = Stroke(width = 1.2.dp.toPx()),
     )
@@ -353,7 +386,7 @@ private fun DrawScope.drawRound(
         // clean hit look sloppy. The Perfect frame is drawn ON the line; Release.errorDp still
         // carries the true value and the judgement never sees this.
         val liveDp = if (phase == Phase.Perfect) plan.targetRadiusDp else ringRadiusDp
-        val live = liveDp.dp.toPx()
+        val live = (liveDp * ringScale).dp.toPx()
         val ringColour = if (phase == Phase.Idle || phase == Phase.Holding || phase == Phase.Perfect) {
             lerp(palette.phosphor, palette.hot, flash)
         } else {
@@ -365,13 +398,13 @@ private fun DrawScope.drawRound(
         if (palette.trailMs > 0 && phase == Phase.Holding) {
             repeat(TRAIL_STEPS) { step ->
                 val ageMs = palette.trailMs * (step + 1f) / TRAIL_STEPS
-                val ghost = (liveDp + plan.speedDpPerSec * (ageMs / 1000f)).dp.toPx()
+                val ghost = ((liveDp + plan.speedDpPerSec * (ageMs / 1000f)) * ringScale).dp.toPx()
                 val ghostAlpha = 0.32f * (1f - (step + 1f) / (TRAIL_STEPS + 1f))
                 drawCircle(
                     color = ringColour.copy(alpha = ghostAlpha),
                     radius = ghost,
                     center = centre,
-                    style = Stroke(plan.strokeDp.dp.toPx()),
+                    style = Stroke((plan.strokeDp * ringScale).dp.toPx()),
                 )
             }
         }
@@ -379,7 +412,7 @@ private fun DrawScope.drawRound(
         drawCircle(ringColour.copy(alpha = 0.05f * halo), live, centre, style = Stroke(22.dp.toPx()))
         drawCircle(ringColour.copy(alpha = 0.10f * halo), live, centre, style = Stroke(13.dp.toPx()))
         drawCircle(ringColour.copy(alpha = 0.26f * halo), live, centre, style = Stroke(6.dp.toPx()))
-        drawCircle(ringColour, live, centre, style = Stroke(plan.strokeDp.dp.toPx()))
+        drawCircle(ringColour, live, centre, style = Stroke((plan.strokeDp * ringScale).dp.toPx()))
 
         if (flash > 0f) {
             drawCircle(
@@ -395,7 +428,7 @@ private fun DrawScope.drawRound(
     if (shock >= 0f) {
         drawCircle(
             color = palette.hot.copy(alpha = 1f - shock),
-            radius = (plan.targetRadiusDp + SHOCK_TRAVEL_DP * shock).dp.toPx(),
+            radius = ((plan.targetRadiusDp + SHOCK_TRAVEL_DP * shock) * ringScale).dp.toPx(),
             center = centre,
             style = Stroke(width = 1.2.dp.toPx()),
         )
@@ -403,7 +436,7 @@ private fun DrawScope.drawRound(
 
     // 5. finger contact bloom
     if (phase == Phase.Holding) {
-        val bloom = BLOOM_DP.dp.toPx()
+        val bloom = (BLOOM_DP * ringScale).dp.toPx()
         drawCircle(
             brush = Brush.radialGradient(
                 0f to palette.hot.copy(alpha = 0.5f),

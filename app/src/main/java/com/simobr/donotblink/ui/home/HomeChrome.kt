@@ -3,7 +3,6 @@ package com.simobr.donotblink.ui.home
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
@@ -26,8 +25,12 @@ import androidx.compose.ui.unit.sp
 import com.simobr.donotblink.ui.common.noRippleClickable
 import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbType
+import com.simobr.donotblink.ui.theme.LocalLayoutScale
 import com.simobr.donotblink.ui.theme.LocalPalette
+import com.simobr.donotblink.ui.theme.LocalRingScale
 import com.simobr.donotblink.ui.theme.PhosphorPalette
+import com.simobr.donotblink.ui.theme.scaled
+import com.simobr.donotblink.ui.theme.scaledType
 import com.simobr.donotblink.ui.theme.tinted
 import kotlin.math.PI
 import kotlin.math.sin
@@ -96,10 +99,15 @@ fun HomeChrome(
         }
     }
 
+    val scale = LocalLayoutScale.current
+    val ringScale = LocalRingScale.current
+
+    // No insets here: PlayScreen already consumed safeDrawing for the whole chrome layer, and
+    // consuming an inset twice double-pads it.
     Box(modifier.fillMaxSize()) {
         Canvas(Modifier.fillMaxSize()) {
-            val radius = GLOW_RADIUS_DP.dp.toPx()
-            val centre = Offset(size.width / 2f, GLOW_CENTRE_Y_DP.dp.toPx())
+            val radius = (GLOW_RADIUS_DP * ringScale).dp.toPx()
+            val centre = Offset(size.width / 2f, (GLOW_CENTRE_Y_DP * scale).dp.toPx())
             drawCircle(
                 brush = Brush.radialGradient(
                     0f to palette.phosphor.copy(alpha = 0.13f),
@@ -115,14 +123,14 @@ fun HomeChrome(
         Text(
             text = "BEST",
             style = BestLabelStyle.tinted(palette),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = BEST_LABEL_TOP_DP.dp),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = BEST_LABEL_TOP_DP.scaled()),
         )
         Text(
             text = best.toString(),
-            style = DnbType.bestNumeral.tinted(palette),
+            style = DnbType.bestNumeral.tinted(palette).scaledType(),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = BEST_NUMERAL_TOP_DP.dp)
+                .padding(top = BEST_NUMERAL_TOP_DP.scaled())
                 .testTag(HomeTags.BEST),
         )
 
@@ -131,7 +139,7 @@ fun HomeChrome(
             style = HoldToBeginStyle.tinted(palette),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = HOLD_TOP_DP.dp)
+                .padding(top = HOLD_TOP_DP.scaled())
                 .testTag(HomeTags.HOLD)
                 .graphicsLayer { alpha = breathe.floatValue },
         )
@@ -143,7 +151,7 @@ fun HomeChrome(
             style = RuleLineStyle,
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = RULE_TOP_DP.dp)
+                .padding(top = RULE_TOP_DP.scaled())
                 .testTag(HomeTags.RULE),
         )
 
@@ -152,7 +160,6 @@ fun HomeChrome(
             style = TitlesLinkStyle.tinted(palette),
             modifier = Modifier
                 .align(Alignment.BottomStart)
-                .navigationBarsPadding()
                 .padding(start = 24.dp, bottom = 24.dp)
                 .testTag(HomeTags.TITLES)
                 .noRippleClickable(onClick = onOpenTitles),
@@ -162,7 +169,6 @@ fun HomeChrome(
             palette = palette,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .navigationBarsPadding()
                 .padding(end = 24.dp, bottom = 18.dp)
                 .testTag(HomeTags.SETTINGS)
                 .noRippleClickable(onClick = onOpenSettings),

@@ -6,11 +6,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import com.simobr.donotblink.game.TITLES
+import com.simobr.donotblink.game.Title
 import com.simobr.donotblink.ui.fail.FailScreen
 import com.simobr.donotblink.ui.fail.FailTags
+import com.simobr.donotblink.ui.theme.ScaledLayout
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -30,18 +34,24 @@ class FailScreenLayoutTest {
     @get:Rule
     val rule = createComposeRule()
 
-    private fun setContent(surfaceHeight: Dp, bannerSlot: Dp) {
+    private fun setContent(
+        surfaceHeight: Dp,
+        bannerSlot: Dp,
+        unlocked: List<Title> = emptyList(),
+    ) {
         rule.setContent {
             Box(Modifier.size(width = 360.dp, height = surfaceHeight)) {
-                FailScreen(
-                    streak = 12,
-                    best = 40,
-                    newlyUnlocked = emptyList(),
-                    onAgain = {},
-                    onHome = {},
-                    bannerEnabled = false,
-                    bannerSlotHeight = bannerSlot,
-                )
+                ScaledLayout {
+                    FailScreen(
+                        streak = 12,
+                        best = 40,
+                        newlyUnlocked = unlocked,
+                        onAgain = {},
+                        onHome = {},
+                        bannerEnabled = false,
+                        bannerSlotHeight = bannerSlot,
+                    )
+                }
             }
         }
         rule.waitForIdle()
@@ -89,5 +99,47 @@ class FailScreenLayoutTest {
         val home = rule.onNodeWithTag(FailTags.HOME).getUnclippedBoundsInRoot()
         val banner = rule.onNodeWithTag(FailTags.BANNER).getUnclippedBoundsInRoot()
         assertTrue("HOME still collides at a 100dp slot", home.bottom <= banner.top)
+    }
+
+    // ---- Stage 6, item 1 -------------------------------------------------------------------
+
+    /**
+     * The unlocked-title list used to be top-anchored at an absolute 520dp and to grow DOWNWARD,
+     * while AGAIN and HOME grew UPWARD from the bottom edge. Two stacks moving toward each other
+     * in the same space meet: AGAIN was drawn on top of the title rows, and on a six-title run it
+     * swallowed HOME as well. One bottom-anchored stack cannot do that at any size.
+     *
+     * This fails on the pre-fix code.
+     */
+    @Test
+    fun the_unlocked_title_list_never_collides_with_again_or_home() {
+        setContent(surfaceHeight = 640.dp, bannerSlot = 60.dp, unlocked = TITLES.take(4))
+
+        val again = rule.onNodeWithTag(FailTags.AGAIN).getUnclippedBoundsInRoot()
+        val home = rule.onNodeWithTag(FailTags.HOME).getUnclippedBoundsInRoot()
+        val titles = rule.onNodeWithTag(FailTags.UNLOCKED).getUnclippedBoundsInRoot()
+        val banner = rule.onNodeWithTag(FailTags.BANNER).getUnclippedBoundsInRoot()
+
+        assertTrue(
+            "AGAIN (${again.top}..${again.bottom}) overlaps the title list " +
+                "(${titles.top}..${titles.bottom})",
+            titles.bottom <= again.top,
+        )
+        assertTrue("AGAIN overlaps HOME", again.bottom <= home.top)
+        assertTrue("HOME overlaps the banner slot", home.bottom <= banner.top)
+    }
+
+    /** Six titles in one run is possible early on. The list is capped; nothing is drawn over. */
+    @Test
+    fun an_overflowing_run_shows_four_rows_and_a_count_not_six_rows() {
+        setContent(surfaceHeight = 640.dp, bannerSlot = 60.dp, unlocked = TITLES.take(6))
+
+        val again = rule.onNodeWithTag(FailTags.AGAIN).getUnclippedBoundsInRoot()
+        val titles = rule.onNodeWithTag(FailTags.UNLOCKED).getUnclippedBoundsInRoot()
+        assertTrue("AGAIN overlaps the capped title list", titles.bottom <= again.top)
+
+        rule.onNodeWithText("+2 MORE").assertExists()
+        // The fifth and sixth names are not drawn; the TITLES screen lists them instead.
+        rule.onNodeWithText(TITLES[4].name).assertDoesNotExist()
     }
 }

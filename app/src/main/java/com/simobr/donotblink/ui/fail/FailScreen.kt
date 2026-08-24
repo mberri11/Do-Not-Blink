@@ -9,8 +9,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.material3.Text
@@ -42,8 +44,12 @@ import com.simobr.donotblink.ui.common.noRippleClickable
 import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbDim
 import com.simobr.donotblink.ui.theme.DnbType
+import com.simobr.donotblink.ui.theme.LocalLayoutScale
 import com.simobr.donotblink.ui.theme.LocalPalette
+import com.simobr.donotblink.ui.theme.LocalRingScale
 import com.simobr.donotblink.ui.theme.PhosphorPalette
+import com.simobr.donotblink.ui.theme.scaled
+import com.simobr.donotblink.ui.theme.scaledType
 import com.simobr.donotblink.ui.theme.tinted
 import kotlinx.coroutines.isActive
 
@@ -52,6 +58,7 @@ object FailTags {
     const val HOME = "fail-home"
     const val STREAK = "fail-streak"
     const val BANNER = "fail-banner"
+    const val UNLOCKED = "fail-unlocked"
 }
 
 /**
@@ -74,7 +81,6 @@ private const val RING_CENTRE_Y_DP = 360f
 private const val STREAK_LABEL_TOP_DP = 300f
 private const val STREAK_NUMERAL_TOP_DP = 322f
 private const val BEST_LINE_TOP_DP = 444f
-private const val UNLOCKED_TOP_DP = 520f
 
 /**
  * The mockup's AGAIN->HOME centres are 86dp apart, which is a 28dp gap under the 58dp button.
@@ -82,6 +88,20 @@ private const val UNLOCKED_TOP_DP = 520f
  * mockup Y-coordinates do not survive a real screen, and 690dp landed HOME on top of the banner.
  */
 private const val AGAIN_TO_HOME_GAP_DP = 28f
+
+/**
+ * Gap between the unlocked-title list and AGAIN. The list used to be top-anchored at an absolute
+ * 520dp and grow DOWNWARD while AGAIN/HOME grew upward from the bottom edge: two stacks moving
+ * toward each other in the same space, meeting at the second title row on a tall device. Both are
+ * now in one bottom-anchored stack, so they cannot collide at any size.
+ */
+private const val UNLOCKED_TO_AGAIN_GAP_DP = 34f
+
+/**
+ * A run that earns more than this many titles shows the four highest and a "+N MORE" line. The
+ * TITLES screen lists every one of them, so nothing is lost by not spelling them all out here.
+ */
+private const val MAX_UNLOCKED_ROWS = 4
 
 /** HOME's touch target. 10sp of type is not a 48dp target on its own. */
 private const val HOME_TOUCH_TARGET_DP = 48f
@@ -108,25 +128,35 @@ fun FailScreen(
     val palette = LocalPalette.current
     BackHandler(onBack = onHome)
 
-    Box(modifier.fillMaxSize().background(DnbColor.Black)) {
+    val scale = LocalLayoutScale.current
+    val ringScale = LocalRingScale.current
+
+    // safeDrawing at the root: this screen's Canvas and its content share one coordinate space,
+    // so consuming the insets here moves both together.
+    Box(
+        modifier
+            .fillMaxSize()
+            .background(DnbColor.Black)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+    ) {
         Canvas(Modifier.fillMaxSize()) {
-            val centre = Offset(size.width / 2f, RING_CENTRE_Y_DP.dp.toPx())
+            val centre = Offset(size.width / 2f, (RING_CENTRE_Y_DP * scale).dp.toPx())
             // the dead outer track
             drawCircle(
                 color = DnbColor.Rule,
-                radius = 168.dp.toPx(),
+                radius = (168f * ringScale).dp.toPx(),
                 center = centre,
                 style = Stroke(width = 1.dp.toPx()),
             )
             // the ring, broken where it died
             drawCircle(
                 color = palette.dim,
-                radius = 96.dp.toPx(),
+                radius = (96f * ringScale).dp.toPx(),
                 center = centre,
                 style = Stroke(
                     width = 1.6.dp.toPx(),
                     pathEffect = PathEffect.dashPathEffect(
-                        BROKEN_RING_DASHES.map { it.dp.toPx() }.toFloatArray(),
+                        BROKEN_RING_DASHES.map { (it * ringScale).dp.toPx() }.toFloatArray(),
                     ),
                 ),
             )
@@ -135,49 +165,64 @@ fun FailScreen(
         Text(
             text = "blinked.",
             style = DnbType.failLine.tinted(palette),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = BLINKED_TOP_DP.dp),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = BLINKED_TOP_DP.scaled()),
         )
 
         Text(
             text = "STREAK",
             style = StreakLabelStyle.tinted(palette),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = STREAK_LABEL_TOP_DP.dp),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = STREAK_LABEL_TOP_DP.scaled()),
         )
         Text(
             text = streak.toString().padStart(2, '0'),
-            style = DnbType.failNumeral.tinted(palette),
+            style = DnbType.failNumeral.tinted(palette).scaledType(),
             modifier = Modifier
                 .align(Alignment.TopCenter)
-                .padding(top = STREAK_NUMERAL_TOP_DP.dp)
+                .padding(top = STREAK_NUMERAL_TOP_DP.scaled())
                 .testTag(FailTags.STREAK),
         )
         Text(
             text = "BEST $best",
             style = BestLineStyle.tinted(palette),
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = BEST_LINE_TOP_DP.dp),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = BEST_LINE_TOP_DP.scaled()),
         )
 
-        if (newlyUnlocked.isNotEmpty()) {
-            Column(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .padding(top = UNLOCKED_TOP_DP.dp, start = DnbDim.screenPadH, end = DnbDim.screenPadH),
-                verticalArrangement = Arrangement.spacedBy(0.dp),
-            ) {
-                newlyUnlocked.forEach { title -> UnlockedTitleRow(title, palette) }
-            }
-        }
-
-        // Everything the player can touch is anchored to the bottom edge, above the reserved
-        // banner slot and above the navigation bar. The upper composition keeps its mockup offsets.
+        // ONE bottom-anchored stack owns the whole lower half: titles, then AGAIN, then HOME.
+        // Nothing down here is positioned from the top, so nothing down here can collide.
         Column(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = bannerSlotHeight + BOTTOM_BLOCK_TO_BANNER_DP.dp),
+                .fillMaxWidth()
+                // No navigationBarsPadding: the root Box already consumed safeDrawing.
+                .padding(bottom = bannerSlotHeight + BOTTOM_BLOCK_TO_BANNER_DP.scaled()),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
+            if (newlyUnlocked.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = DnbDim.screenPadH, end = DnbDim.screenPadH)
+                        .testTag(FailTags.UNLOCKED),
+                    verticalArrangement = Arrangement.spacedBy(0.dp),
+                ) {
+                    newlyUnlocked.take(MAX_UNLOCKED_ROWS).forEach { title ->
+                        UnlockedTitleRow(title, palette)
+                    }
+                    val overflow = newlyUnlocked.size - MAX_UNLOCKED_ROWS
+                    if (overflow > 0) {
+                        Box(Modifier.fillMaxWidth().height(DnbDim.titleRowHeight)) {
+                            Text(
+                                text = "+$overflow MORE",
+                                style = UnlockedThresholdStyle.tinted(palette),
+                                modifier = Modifier.align(Alignment.CenterStart),
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(UNLOCKED_TO_AGAIN_GAP_DP.scaled()))
+            }
+
             AgainButton(palette = palette, onClick = onAgain)
 
             Spacer(Modifier.height(AGAIN_TO_HOME_GAP_DP.dp))
@@ -203,7 +248,8 @@ fun FailScreen(
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
+                // No navigationBarsPadding here either: the root Box consumes safeDrawing for the
+                // whole screen, and that is the single call site that owns the bottom inset.
                 .fillMaxWidth()
                 .height(bannerSlotHeight)
                 .testTag(FailTags.BANNER),
