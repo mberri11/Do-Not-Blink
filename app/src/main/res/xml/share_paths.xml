@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The ONLY path this app ever exposes: one directory inside its own cache, holding the rendered
+  daily-trial card and nothing else. ShareCard clears it on every render, so at most one PNG exists
+  at a time and no player data of any kind is reachable through this provider.
+-->
+<paths>
+    <cache-path
+        name="shares"
+        path="shares/" />
+</paths>

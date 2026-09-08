@@ -15,16 +15,26 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.simobr.donotblink.BuildConfig
 import com.simobr.donotblink.ads.showsPrivacyOptionsRow
+import com.simobr.donotblink.game.DailyResult
 import com.simobr.donotblink.game.GameViewModel
+import com.simobr.donotblink.game.Mode
 import com.simobr.donotblink.game.Phase
+import com.simobr.donotblink.ui.daily.DailyResultScreen
+import com.simobr.donotblink.ui.daily.ShareCard
+import com.simobr.donotblink.ui.theme.PhosphorPalette
 import com.simobr.donotblink.ui.continueoffer.ContinueOfferScreen
 import com.simobr.donotblink.ui.fail.FailScreen
 import com.simobr.donotblink.ui.licences.LicencesScreen
@@ -38,6 +48,7 @@ import com.simobr.donotblink.ui.theme.LocalPalette
 import com.simobr.donotblink.ui.theme.ScaledLayout
 import com.simobr.donotblink.ui.theme.phosphorById
 import com.simobr.donotblink.ui.titles.TitlesScreen
+import com.simobr.donotblink.ui.twitch.TwitchScreen
 
 /**
  * The whole navigation model. A handful of screens with no deep links do not justify
@@ -50,6 +61,11 @@ sealed interface Screen {
     data object Home : Screen { override val id = "home" }
     data object RoundCard : Screen { override val id = "roundcard" }
     data object Play : Screen { override val id = "play" }
+
+    /** The trial's play surface. Same surface as [Play]; the view model is in Daily mode. */
+    data object Daily : Screen { override val id = "daily" }
+    data object DailyResult : Screen { override val id = "dailyresult" }
+    data object Twitch : Screen { override val id = "twitch" }
     data object ContinueOffer : Screen { override val id = "continue" }
     data object Fail : Screen { override val id = "fail" }
     data object Titles : Screen { override val id = "titles" }
@@ -62,6 +78,9 @@ sealed interface Screen {
             Home.id -> Home
             RoundCard.id -> RoundCard
             Play.id -> Play
+            Daily.id -> Daily
+            DailyResult.id -> DailyResult
+            Twitch.id -> Twitch
             ContinueOffer.id -> ContinueOffer
             Fail.id -> Fail
             Titles.id -> Titles
@@ -118,22 +137,93 @@ fun AppRoot(
                     // which is a plain recomposition: the Canvas, its pointerInput keys and the
                     // running gesture coroutine all survive, so the hold that began on Home is the
                     // hold that gets judged.
-                    Screen.Home, Screen.Play -> {
+                    // Screen.Daily joins this branch deliberately: the trial is the SAME surface in
+                    // a different mode, so it must be the same call site. Giving it its own branch
+                    // would dispose and rebuild the Canvas and its pointerInput on entry — the exact
+                    // bug that once made the first round of every session unwinnable.
+                    Screen.Home, Screen.Play, Screen.Daily -> {
                         // Back leaves a run; on Home it is the system's to handle, so it is disabled
                         // rather than conditionally registered — an unconditional call site keeps the
                         // composition structure identical either side of the flip.
-                        BackHandler(enabled = screen == Screen.Play) {
-                            viewModel.startNewRun()
+                        BackHandler(enabled = screen != Screen.Home) {
+                            if (screen == Screen.Daily) {
+                                viewModel.abandonDailyTrial()
+                            } else {
+                                viewModel.startNewRun()
+                            }
                             screen = Screen.Home
                         }
+
+                        // The trial ends on its tenth ring, inside the frame loop — there is no tap
+                        // to hang the navigation off, so the phase is what moves the screen.
+                        LaunchedEffect(state.phase, state.mode, screen) {
+                            when {
+                                screen != Screen.Daily -> Unit
+                                state.phase == Phase.DailyDone -> screen = Screen.DailyResult
+                                // `screen` survives process death in rememberSaveable; the view
+                                // model does not. Coming back from a kill mid-trial would restore
+                                // the Daily screen around a freshly Endless view model, and the
+                                // player would be playing the ordinary game under the trial's
+                                // chrome. The attempt was never recorded, so Home is the honest
+                                // place to land — the trial is still there to start properly.
+                                state.mode != Mode.Daily -> screen = Screen.Home
+                            }
+                        }
+
                         PlayScreen(
                             viewModel = viewModel,
                             homeChrome = screen == Screen.Home,
-                            onRoundStarted = { screen = Screen.Play },
+                            // A press during the trial must not flip the screen to Play: that would
+                            // take the surface out of Daily mode's chrome mid-trial.
+                            onRoundStarted = { if (screen == Screen.Home) screen = Screen.Play },
                             onFailed = { screen = afterFail(viewModel) },
                             onOpenTitles = { screen = Screen.Titles },
                             onOpenSettings = { screen = Screen.Settings },
+                            onOpenDaily = {
+                                // startDailyTrial refuses a second attempt and says so, so the
+                                // decision of where to go lives with the rule, not with the UI.
+                                screen = if (viewModel.startDailyTrial()) {
+                                    Screen.Daily
+                                } else {
+                                    Screen.DailyResult
+                                }
+                            },
+                            onOpenTwitch = { screen = Screen.Twitch },
                         )
+                    }
+
+                    Screen.Twitch -> TwitchScreen(
+                        bestMs = state.twitchBestMs,
+                        onReaction = viewModel::recordTwitchReaction,
+                        onHome = { screen = Screen.Home },
+                        hapticsEnabled = state.hapticsEnabled,
+                        soundEnabled = state.soundEnabled,
+                        onSittingCompleted = viewModel::onReflexSittingCompleted,
+                    )
+
+                    Screen.DailyResult -> {
+                        val context = LocalContext.current
+                        val scope = rememberCoroutineScope()
+                        val result = state.dailyResult
+                        val leave = {
+                            viewModel.leaveDailyTrial()
+                            screen = Screen.Home
+                        }
+                        // A result that is somehow absent cannot be rendered, and stranding the
+                        // player on an empty screen is worse than sending them home.
+                        if (result == null) {
+                            LaunchedEffect(Unit) { leave() }
+                        } else {
+                            DailyResultScreen(
+                                result = result,
+                                dayStreak = state.dailyDayStreak,
+                                bestHits = state.dailyBestHits,
+                                onShare = {
+                                    scope.launch { shareDailyResult(context, result, palette) }
+                                },
+                                onHome = leave,
+                            )
+                        }
                     }
 
                     Screen.RoundCard -> {
@@ -167,7 +257,8 @@ fun AppRoot(
                         streak = state.lastRunStreak,
                         best = state.best,
                         newlyUnlocked = state.newlyUnlockedTitles,
-                        bannerEnabled = viewModel.adsEnabled,
+                        lastRelease = state.lastRelease,
+                        bannerEnabled = state.adsEnabled,
                         onAgain = {
                             viewModel.startNewRun()
                             screen = Screen.RoundCard
@@ -203,6 +294,7 @@ fun AppRoot(
                             onOpenPrivacyPolicy = { openUrl(context, BuildConfig.PRIVACY_POLICY_URL) },
                             onOpenLicences = { screen = Screen.Licences },
                             onBack = { screen = Screen.Home },
+                            bannerEnabled = state.adsEnabled,
                         )
                     }
 
@@ -224,6 +316,33 @@ fun AppRoot(
 /** A fail either buys the player an offer, or it is simply over. */
 private fun afterFail(viewModel: GameViewModel): Screen =
     if (viewModel.state.value.phase == Phase.ContinueOffer) Screen.ContinueOffer else Screen.Fail
+
+/**
+ * Renders the share card off the main thread, then hands it to the system chooser.
+ *
+ * Every step is allowed to fail without consequence: a card that cannot be drawn or written still
+ * shares as text, and a device with nothing to share to simply does nothing. A share button is never
+ * worth a crash.
+ */
+private suspend fun shareDailyResult(
+    context: Context,
+    result: DailyResult,
+    palette: PhosphorPalette,
+) {
+    val uri = withContext(Dispatchers.Default) {
+        runCatching {
+            val bitmap = ShareCard.render(
+                context = context,
+                result = result,
+                phosphor = palette.phosphor.toArgb(),
+                hot = palette.hot.toArgb(),
+                dim = palette.dim.toArgb(),
+            )
+            ShareCard.writeForSharing(context, bitmap, result)
+        }.getOrNull()
+    }
+    runCatching { context.startActivity(ShareCard.shareIntent(result, uri)) }
+}
 
 /**
  * Hands a URL to whatever the device uses for the web. A plain [Intent.ACTION_VIEW] — Custom Tabs

@@ -40,10 +40,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.simobr.donotblink.game.DailyTrial
 import com.simobr.donotblink.game.Difficulty
 import com.simobr.donotblink.game.GameEvent
 import com.simobr.donotblink.game.GameViewModel
+import com.simobr.donotblink.game.Mode
 import com.simobr.donotblink.game.Phase
+import com.simobr.donotblink.game.Readout
 import com.simobr.donotblink.game.RoundPlan
 import com.simobr.donotblink.game.Teaching
 import com.simobr.donotblink.ui.theme.DnbColor
@@ -64,6 +67,7 @@ object PlayScreenTags {
     const val SURFACE = "play-surface"
     const val STREAK = "play-streak"
     const val RULE = "play-rule"
+    const val PRECISION = "play-precision"
 }
 
 /**
@@ -80,6 +84,16 @@ internal val RuleLineStyle = DnbType.microLabel.copy(
     fontWeight = FontWeight.W400,
     letterSpacing = 0.28.em,
     color = DnbColor.LabelMid,
+)
+
+/**
+ * The signed error under a perfect release. It rides [DnbColor.Hot] because it belongs to the flash
+ * — it is the flash saying how good the hit actually was, and it leaves with it.
+ */
+internal val PrecisionStyle = DnbType.microLabel.copy(
+    fontSize = 11.sp,
+    letterSpacing = 0.22.em,
+    color = DnbColor.Hot,
 )
 
 /** Outer dim track, and the tick marks that sit just outside it. Read off the mockup. */
@@ -107,6 +121,8 @@ fun PlayScreen(
     onFailed: () -> Unit = {},
     onOpenTitles: () -> Unit = {},
     onOpenSettings: () -> Unit = {},
+    onOpenDaily: () -> Unit = {},
+    onOpenTwitch: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val palette = LocalPalette.current
@@ -115,8 +131,12 @@ fun PlayScreen(
     val latestFailed = rememberUpdatedState(onFailed)
     val reportDown = remember { { latestRoundStarted.value.invoke() } }
 
-    LaunchedEffect(state.phase, state.roundId) {
-        if (state.phase == Phase.Failed || state.phase == Phase.ContinueOffer) {
+    // Only endless mode leaves for the fail screen. In a trial a miss is scored and the next ring
+    // arms itself, so this must not fire — it would tear the player out of ring three of ten.
+    LaunchedEffect(state.phase, state.roundId, state.mode) {
+        if (state.mode == Mode.Endless &&
+            (state.phase == Phase.Failed || state.phase == Phase.ContinueOffer)
+        ) {
             delay(FAIL_DWELL_MS)
             latestFailed.value.invoke()
         }
@@ -135,9 +155,18 @@ fun PlayScreen(
     // Frames are only asked for while something actually moves. Idle, Failed and the states past
     // it are static: they take one frame to paint and then stop, which keeps a still screen off the
     // CPU on low-end hardware (and lets a Compose test reach idle).
-    val animating = state.phase == Phase.Holding || state.phase == Phase.Perfect
+    //
+    // A missed TRIAL ring is the exception: its dwell is driven by onFrame, so frames must keep
+    // coming or the trial would stop dead on the first ring anyone misses.
+    val animating = state.phase == Phase.Holding ||
+        state.phase == Phase.Perfect ||
+        (state.mode == Mode.Daily && state.phase == Phase.Failed)
 
-    LaunchedEffect(state.roundId, state.phase) {
+    // state.mode is a KEY here, not just an input to `animating`: every current caller happens to
+    // flip mode in the same breath as phase or roundId, which is what makes this safe today, not
+    // what makes it correct. Without the key, a future mode change alone would leave this loop
+    // running on a stale `animating` captured from the composition that launched it.
+    LaunchedEffect(state.roundId, state.phase, state.mode) {
         do {
             withFrameNanos { frameTimeNanos ->
                 // Choreographer frame time and MotionEvent uptimeMillis share one timebase, so the
@@ -238,13 +267,32 @@ fun PlayScreen(
                 best = state.best,
                 onOpenTitles = onOpenTitles,
                 onOpenSettings = onOpenSettings,
+                dailyPlayedToday = state.dailyPlayedToday,
+                dailyHitsToday = state.dailyResult?.hits ?: 0,
+                onOpenDaily = onOpenDaily,
+                twitchBestMs = state.twitchBestMs,
+                onOpenTwitch = onOpenTwitch,
             )
         } else {
             StreakBlock(
-                streak = state.streak,
+                // In a trial the numeral is hits-so-far and the caption is which ring you are on:
+                // "STREAK" would be a lie, because a trial ring survives a miss.
+                caption = if (state.mode == Mode.Daily) {
+                    "RING ${(state.dailyRingIndex + 1).coerceAtMost(DailyTrial.RINGS)}/${DailyTrial.RINGS}"
+                } else {
+                    "STREAK"
+                },
+                streak = if (state.mode == Mode.Daily) state.dailyHits else state.streak,
                 phase = state.phase,
                 palette = palette,
                 digitScale = digitScale,
+                // The hit's own error, for the 540ms the flash and its quiet last. Reading
+                // lastRelease in composition is safe: it changes at judgement, never per frame.
+                precision = if (state.phase == Phase.Perfect) {
+                    Readout.precisionLine(state.lastRelease)
+                } else {
+                    ""
+                },
                 modifier = Modifier.align(Alignment.TopCenter),
             )
 
@@ -307,10 +355,12 @@ private fun Modifier.roundInput(
 
 @Composable
 private fun StreakBlock(
+    caption: String,
     streak: Int,
     phase: Phase,
     palette: PhosphorPalette,
     digitScale: FloatState,
+    precision: String,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -318,7 +368,7 @@ private fun StreakBlock(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(STREAK_GAP_DP.dp),
     ) {
-        Text(text = "STREAK", style = StreakCaptionStyle)
+        Text(text = caption, style = StreakCaptionStyle)
         Text(
             text = streak.toString().padStart(2, '0'),
             style = (if (phase == Phase.Perfect) DnbType.streakPerfect else DnbType.streakLive)
@@ -331,6 +381,13 @@ private fun StreakBlock(
                     scaleX = scale
                     scaleY = scale
                 },
+        )
+        // Always laid out, so the streak numeral above it does not jump when a hit lands. The
+        // string is empty outside Phase.Perfect and the row simply measures to nothing visible.
+        Text(
+            text = precision,
+            style = PrecisionStyle.tinted(palette),
+            modifier = Modifier.testTag(PlayScreenTags.PRECISION),
         )
     }
 }

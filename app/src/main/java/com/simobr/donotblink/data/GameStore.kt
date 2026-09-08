@@ -10,6 +10,8 @@ import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.simobr.donotblink.game.DailyResult
+import com.simobr.donotblink.game.DailyTrial
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -33,6 +35,18 @@ interface GameStore {
     val lifetimeRuns: Flow<Int>
     val firstLaunchEpoch: Flow<Long>
 
+    /** The most recently finished daily trial, or null if none has ever been played. */
+    val lastDailyResult: Flow<DailyResult?>
+
+    /** Consecutive days finished, ending with [lastDailyResult]'s day. */
+    val dailyDayStreak: Flow<Int>
+
+    /** Most rings ever hit in one trial. */
+    val dailyBestHits: Flow<Int>
+
+    /** Fastest reflex-test reaction ever recorded, in ms. 0 means never played. */
+    val twitchBestMs: Flow<Int>
+
     suspend fun setBestStreak(value: Int)
     suspend fun setHapticsEnabled(enabled: Boolean)
     suspend fun setSoundEnabled(enabled: Boolean)
@@ -42,8 +56,57 @@ interface GameStore {
     suspend fun unlockPalette(id: String)
     suspend fun incrementLifetimeRuns()
 
+    /**
+     * Stores a finished trial and rolls the day-streak and the best-hits record forward with it.
+     *
+     * One write, because the three values are one fact: a result whose streak did not move with it
+     * would be a lie the next launch would read back.
+     */
+    suspend fun recordDailyResult(result: DailyResult)
+
+    /** Keeps [reactionMs] only if it beats what is stored — lower is better, and 0 means unset. */
+    suspend fun recordTwitchReaction(reactionMs: Int)
+
     /** Writes [epochMs] only if this is genuinely the first launch. */
     suspend fun recordFirstLaunch(epochMs: Long)
+}
+
+/**
+ * A [DailyResult] as one preference string: `epochDay|marks|meanErrorMs`, marks being one character
+ * per ring. DataStore Preferences stores primitives, and this app has no Room and no serialization
+ * dependency — CLAUDE.md pins the dependency list exactly — so the encoding is explicit and tested
+ * rather than reflective.
+ *
+ * Anything unparseable decodes to null and the player simply gets today's trial back. A corrupt
+ * preference must never be able to crash the app on launch.
+ */
+internal object DailyCodec {
+    private const val HIT = '1'
+    private const val MISS = '0'
+
+    fun encode(result: DailyResult): String = buildString {
+        append(result.epochDay)
+        append('|')
+        result.marks.forEach { append(if (it) HIT else MISS) }
+        append('|')
+        append(result.meanAbsErrorMs)
+    }
+
+    fun decode(raw: String?): DailyResult? {
+        if (raw.isNullOrBlank()) return null
+        val parts = raw.split('|')
+        if (parts.size != 3) return null
+        val epochDay = parts[0].toLongOrNull() ?: return null
+        val marksText = parts[1]
+        if (marksText.length != DailyTrial.RINGS) return null
+        if (marksText.any { it != HIT && it != MISS }) return null
+        val meanError = parts[2].toIntOrNull() ?: return null
+        return DailyResult(
+            epochDay = epochDay,
+            marks = marksText.map { it == HIT },
+            meanAbsErrorMs = meanError,
+        )
+    }
 }
 
 private val Context.gameDataStore: DataStore<Preferences> by preferencesDataStore(name = "do_not_blink")
@@ -60,6 +123,11 @@ class DataStoreGameStore(private val dataStore: DataStore<Preferences>) : GameSt
     override val selectedPhosphorId: Flow<String> = dataStore.data.map { it[KEY_PHOSPHOR] ?: "" }
     override val lifetimeRuns: Flow<Int> = dataStore.data.map { it[KEY_LIFETIME_RUNS] ?: 0 }
     override val firstLaunchEpoch: Flow<Long> = dataStore.data.map { it[KEY_FIRST_LAUNCH] ?: 0L }
+    override val lastDailyResult: Flow<DailyResult?> =
+        dataStore.data.map { DailyCodec.decode(it[KEY_DAILY_RESULT]) }
+    override val dailyDayStreak: Flow<Int> = dataStore.data.map { it[KEY_DAILY_DAY_STREAK] ?: 0 }
+    override val dailyBestHits: Flow<Int> = dataStore.data.map { it[KEY_DAILY_BEST_HITS] ?: 0 }
+    override val twitchBestMs: Flow<Int> = dataStore.data.map { it[KEY_TWITCH_BEST_MS] ?: 0 }
 
     override suspend fun setBestStreak(value: Int) {
         dataStore.edit { it[KEY_BEST] = value }
@@ -93,6 +161,29 @@ class DataStoreGameStore(private val dataStore: DataStore<Preferences>) : GameSt
         dataStore.edit { it[KEY_LIFETIME_RUNS] = (it[KEY_LIFETIME_RUNS] ?: 0) + 1 }
     }
 
+    override suspend fun recordDailyResult(result: DailyResult) {
+        dataStore.edit { prefs ->
+            // Read the PREVIOUS result inside the same edit block: computing the streak from a
+            // flow collected elsewhere would race a second write and could double-count a day.
+            val previous = DailyCodec.decode(prefs[KEY_DAILY_RESULT])
+            prefs[KEY_DAILY_DAY_STREAK] = DailyTrial.nextDayStreak(
+                previousEpochDay = previous?.epochDay,
+                previousStreak = prefs[KEY_DAILY_DAY_STREAK] ?: 0,
+                todayEpochDay = result.epochDay,
+            )
+            prefs[KEY_DAILY_RESULT] = DailyCodec.encode(result)
+            prefs[KEY_DAILY_BEST_HITS] = maxOf(prefs[KEY_DAILY_BEST_HITS] ?: 0, result.hits)
+        }
+    }
+
+    override suspend fun recordTwitchReaction(reactionMs: Int) {
+        dataStore.edit { prefs ->
+            // Lower is better, so an unset 0 must not win the comparison.
+            val stored = prefs[KEY_TWITCH_BEST_MS] ?: 0
+            if (stored == 0 || reactionMs < stored) prefs[KEY_TWITCH_BEST_MS] = reactionMs
+        }
+    }
+
     override suspend fun recordFirstLaunch(epochMs: Long) {
         dataStore.edit { if (it[KEY_FIRST_LAUNCH] == null) it[KEY_FIRST_LAUNCH] = epochMs }
     }
@@ -106,6 +197,10 @@ class DataStoreGameStore(private val dataStore: DataStore<Preferences>) : GameSt
         val KEY_LIFETIME_RUNS = intPreferencesKey("lifetime_runs")
         val KEY_FIRST_LAUNCH = longPreferencesKey("first_launch_epoch")
         val KEY_PHOSPHOR = stringPreferencesKey("selected_phosphor_id")
+        val KEY_DAILY_RESULT = stringPreferencesKey("daily_last_result")
+        val KEY_DAILY_DAY_STREAK = intPreferencesKey("daily_day_streak")
+        val KEY_DAILY_BEST_HITS = intPreferencesKey("daily_best_hits")
+        val KEY_TWITCH_BEST_MS = intPreferencesKey("twitch_best_ms")
     }
 }
 
@@ -119,6 +214,10 @@ class InMemoryGameStore(
     selectedPhosphorId: String = "",
     lifetimeRuns: Int = 0,
     firstLaunchEpoch: Long = 0L,
+    lastDailyResult: DailyResult? = null,
+    dailyDayStreak: Int = 0,
+    dailyBestHits: Int = 0,
+    twitchBestMs: Int = 0,
 ) : GameStore {
 
     private val best = MutableStateFlow(bestStreak)
@@ -129,6 +228,10 @@ class InMemoryGameStore(
     private val phosphor = MutableStateFlow(selectedPhosphorId)
     private val runs = MutableStateFlow(lifetimeRuns)
     private val firstLaunch = MutableStateFlow(firstLaunchEpoch)
+    private val daily = MutableStateFlow(lastDailyResult)
+    private val dayStreak = MutableStateFlow(dailyDayStreak)
+    private val bestHits = MutableStateFlow(dailyBestHits)
+    private val twitchBest = MutableStateFlow(twitchBestMs)
 
     override val bestStreak: Flow<Int> = best.asStateFlow()
     override val hapticsEnabled: Flow<Boolean> = haptics.asStateFlow()
@@ -138,6 +241,10 @@ class InMemoryGameStore(
     override val selectedPhosphorId: Flow<String> = phosphor.asStateFlow()
     override val lifetimeRuns: Flow<Int> = runs.asStateFlow()
     override val firstLaunchEpoch: Flow<Long> = firstLaunch.asStateFlow()
+    override val lastDailyResult: Flow<DailyResult?> = daily.asStateFlow()
+    override val dailyDayStreak: Flow<Int> = dayStreak.asStateFlow()
+    override val dailyBestHits: Flow<Int> = bestHits.asStateFlow()
+    override val twitchBestMs: Flow<Int> = twitchBest.asStateFlow()
 
     override suspend fun setBestStreak(value: Int) { best.value = value }
     override suspend fun setHapticsEnabled(enabled: Boolean) { haptics.value = enabled }
@@ -147,6 +254,18 @@ class InMemoryGameStore(
     override suspend fun setSelectedPhosphorId(id: String) { phosphor.value = id }
     override suspend fun unlockPalette(id: String) { palettes.value = palettes.value + id }
     override suspend fun incrementLifetimeRuns() { runs.value += 1 }
+    override suspend fun recordDailyResult(result: DailyResult) {
+        dayStreak.value = DailyTrial.nextDayStreak(
+            previousEpochDay = daily.value?.epochDay,
+            previousStreak = dayStreak.value,
+            todayEpochDay = result.epochDay,
+        )
+        daily.value = result
+        bestHits.value = maxOf(bestHits.value, result.hits)
+    }
+    override suspend fun recordTwitchReaction(reactionMs: Int) {
+        if (twitchBest.value == 0 || reactionMs < twitchBest.value) twitchBest.value = reactionMs
+    }
     override suspend fun recordFirstLaunch(epochMs: Long) {
         if (firstLaunch.value == 0L) firstLaunch.value = epochMs
     }

@@ -17,14 +17,22 @@ data class InterstitialGate(
     val interstitialsThisSession: Int,
 )
 
-const val MIN_RUNS_BETWEEN_INTERSTITIALS = 3
-const val MIN_SECONDS_BETWEEN_INTERSTITIALS = 90L
-const val CLEAN_RUNS_AT_SESSION_START = 4
-const val MAX_INTERSTITIALS_PER_SESSION = 6
+/**
+ * Tightened from 3/90s/4/6 (Stage 6) at Simo's request for the v1.2.0 production build: more
+ * impressions, same shape of gate. Every exclusion below is untouched — a personal best and a
+ * rewarded continue are still never taxed, because THOSE are what a Disruptive Ads strike is
+ * actually about, not the raw numbers here.
+ */
+const val MIN_RUNS_BETWEEN_INTERSTITIALS = 2
+const val MIN_SECONDS_BETWEEN_INTERSTITIALS = 60L
+const val CLEAN_RUNS_AT_SESSION_START = 3
+const val MAX_INTERSTITIALS_PER_SESSION = 8
 
 /**
- * "Every 3 runs" would mean an interstitial every 30 seconds for a good player — a retention
- * catastrophe and a policy problem. Every clause below has to hold.
+ * Every clause has to hold. The run count alone is not a cadence: runs here can end in eight
+ * seconds, so "every 2 runs" unaccompanied would be an interstitial every twenty seconds — a
+ * retention catastrophe and a policy problem. The seconds clause is what actually paces this;
+ * the run clause only stops an ad landing on two consecutive fails.
  */
 fun shouldShowInterstitial(gate: InterstitialGate): Boolean =
     gate.runsSinceLastInterstitial >= MIN_RUNS_BETWEEN_INTERSTITIALS &&
@@ -34,32 +42,42 @@ fun shouldShowInterstitial(gate: InterstitialGate): Boolean =
         !gate.previousRunUsedRewardedContinue &&
         gate.interstitialsThisSession < MAX_INTERSTITIALS_PER_SESSION
 
-const val CONTINUE_MIN_STREAK = 8
-const val CONTINUE_BEST_MARGIN = 3
+/**
+ * Was 8, gated further by `streak >= bestStreak - 3` — the offer only ever appeared on a run
+ * already near the personal best. Simo's ask for v1.2.0: offer it in every case, not just the good
+ * ones. Dropped to the smallest floor that still means something: at streak 0 there is nothing yet
+ * to protect — a continue would resume at streak 0, identical to AGAIN, for the price of an ad
+ * watched for no benefit. One perfect release is the line past which continuing is worth anything.
+ */
+const val CONTINUE_MIN_STREAK = 1
 const val MAX_CONTINUES_PER_RUN = 2
 
 /**
- * The offer only lands when the run was actually worth something. A flat "streak >= 10" offers the
- * ad while the run is still cheap, and opt-in stays low.
+ * The offer no longer looks at how the run compares to the personal best — see
+ * [CONTINUE_MIN_STREAK].
+ *
+ * This answers only "is this run worth offering for". Whether a rewarded ad actually exists to show
+ * is a separate question, asked alongside this one at the call site, so a player with no fill never
+ * sees the offer however good the run was.
  *
  * @param streak the streak the run reached.
- * @param bestStreak the personal best as it stands now.
  * @param continuesUsedThisRun how many rewarded continues this run has already spent.
  * @param bestAtRunStart the personal best the run began with — the record a second continue has
  *   to have beaten.
  */
 fun shouldOfferContinue(
     streak: Int,
-    bestStreak: Int,
     continuesUsedThisRun: Int,
     bestAtRunStart: Int,
 ): Boolean = when {
     continuesUsedThisRun >= MAX_CONTINUES_PER_RUN -> false
 
-    // The second continue is rare on purpose: only once the run has passed the old record.
+    // The second continue stays rare on purpose: only once the run has passed the old record.
+    // This is a different, deliberately-tighter rule from the first continue's floor above, not
+    // an oversight — a run already extended once needs to have earned the second extension.
     continuesUsedThisRun == 1 -> streak > bestAtRunStart
 
-    else -> streak >= CONTINUE_MIN_STREAK && streak >= bestStreak - CONTINUE_BEST_MARGIN
+    else -> streak >= CONTINUE_MIN_STREAK
 }
 
 /**

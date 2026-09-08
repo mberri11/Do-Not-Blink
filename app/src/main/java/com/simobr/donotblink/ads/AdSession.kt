@@ -24,6 +24,21 @@ class AdSession(private val nowEpochMs: () -> Long) {
         previousRunUsedRewardedContinue = usedRewardedContinue
     }
 
+    /**
+     * A completed activity that is not an endless run — today, a finished reflex sitting.
+     *
+     * It feeds the same two counters, so one cadence paces the whole app rather than each mode
+     * inventing its own quota. It deliberately does NOT touch [previousRunWasPersonalBest] or
+     * [previousRunUsedRewardedContinue]: those describe the last RUN, and a reflex sitting neither
+     * earns nor spends them. Routing this through [onRunEnded] with `false, false` would have
+     * silently cancelled the protection a personal best had just bought — play a blinder, wander
+     * into the reflex test, come back and get taxed anyway.
+     */
+    fun onSideActivityEnded() {
+        runsThisSession += 1
+        runsSinceLastInterstitial += 1
+    }
+
     fun onInterstitialShown() {
         interstitialsThisSession += 1
         runsSinceLastInterstitial = 0

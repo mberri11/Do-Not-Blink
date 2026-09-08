@@ -1,7 +1,9 @@
 package com.simobr.donotblink.ui.home
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -22,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import com.simobr.donotblink.game.DailyTrial
 import com.simobr.donotblink.ui.common.noRippleClickable
 import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbType
@@ -42,6 +45,8 @@ object HomeTags {
     const val BEST = "home-best"
     const val HOLD = "home-hold"
     const val RULE = "home-rule"
+    const val DAILY = "home-daily"
+    const val TWITCH = "home-twitch"
 }
 
 /**
@@ -72,6 +77,16 @@ private const val HOLD_TOP_DP = 566f
 private const val RULE_TOP_DP = 598f
 private const val BREATHE_PERIOD_MS = 2400L
 private const val GEAR_SIZE_DP = 18f
+
+/**
+ * Between the two mode rows at the bottom of Home.
+ *
+ * Sized from the TOUCH targets, not the type. Each row is ~13dp of text but every clickable expands
+ * to the 48dp minimum target, so a gap chosen to look right (14dp) left the two targets overlapping
+ * by 21dp on device — the lower row, drawn last, silently swallowed taps meant for the upper one.
+ * 36dp puts the centres just over 48dp apart, which is the smallest gap that cannot overlap.
+ */
+private const val MODE_ROW_GAP_DP = 36f
 private const val GEAR_STROKE_DP = 1.4f
 
 /**
@@ -84,6 +99,14 @@ fun HomeChrome(
     onOpenTitles: () -> Unit,
     onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
+    /** True once today's trial is spent; the row then reports the score instead of inviting a run. */
+    dailyPlayedToday: Boolean = false,
+    /** Rings hit in today's trial. Only read when [dailyPlayedToday]. */
+    dailyHitsToday: Int = 0,
+    onOpenDaily: () -> Unit = {},
+    /** Fastest reflex reading ever taken. 0 means the test has never been run. */
+    twitchBestMs: Int = 0,
+    onOpenTwitch: () -> Unit = {},
 ) {
     // The breathe. An infinite frame clock rather than a plain frame loop, so a Compose test can
     // still reach idle. The value is read inside graphicsLayer: draw phase only.
@@ -164,6 +187,40 @@ fun HomeChrome(
                 .testTag(HomeTags.TITLES)
                 .noRippleClickable(onClick = onOpenTitles),
         )
+
+        // The two things that are not the main game, stacked between TITLES and the gear. The
+        // trial is the reason to come back tomorrow; the reflex test is the reason to stay now.
+        Column(
+            modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(MODE_ROW_GAP_DP.dp),
+        ) {
+            // Lit while today's attempt is unspent, and reporting the score once it is — never
+            // offering a run the game would then have to refuse.
+            Text(
+                text = if (dailyPlayedToday) {
+                    "TRIAL $dailyHitsToday/${DailyTrial.RINGS}"
+                } else {
+                    "TODAY'S TRIAL"
+                },
+                style = if (dailyPlayedToday) {
+                    TitlesLinkStyle.copy(color = DnbColor.LabelMid)
+                } else {
+                    TitlesLinkStyle.tinted(palette).copy(color = palette.phosphor)
+                },
+                modifier = Modifier
+                    .testTag(HomeTags.DAILY)
+                    .noRippleClickable(onClick = onOpenDaily),
+            )
+
+            Text(
+                text = if (twitchBestMs > 0) "REFLEX ${twitchBestMs}MS" else "REFLEX TEST",
+                style = TitlesLinkStyle.tinted(palette),
+                modifier = Modifier
+                    .testTag(HomeTags.TWITCH)
+                    .noRippleClickable(onClick = onOpenTwitch),
+            )
+        }
 
         SettingsGlyph(
             palette = palette,

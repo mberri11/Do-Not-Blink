@@ -15,6 +15,7 @@ import com.simobr.donotblink.ads.RewardedSurface
 import com.simobr.donotblink.ads.shouldOfferContinue
 import com.simobr.donotblink.ads.shouldShowInterstitial
 import com.simobr.donotblink.data.InMemoryGameStore
+import java.time.LocalDate
 import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,7 +44,16 @@ import kotlinx.coroutines.launch
  * makes the judgement exact and the unit test a pure function of its inputs. (The wall clock used
  * for `firstLaunchEpoch` is injected, and is bookkeeping, not timing.)
  */
-enum class Phase { Idle, Holding, Perfect, Failed, ContinueOffer, Results }
+enum class Phase { Idle, Holding, Perfect, Failed, ContinueOffer, Results, DailyDone }
+
+/**
+ * Which game is being played on the one play surface.
+ *
+ * [Daily] reuses every part of [Endless] that matters — the gesture, the frame loop, the hum, the
+ * judging — and changes only what a miss means. Duplicating the real-time half of this class to get
+ * a second mode would have been the riskiest possible way to add one.
+ */
+enum class Mode { Endless, Daily }
 
 data class PlayState(
     val phase: Phase,
@@ -75,7 +85,36 @@ data class PlayState(
     val lifetimeRuns: Int,
     /** UMP: this user must be offered a way back into the consent form. EEA/UK only. */
     val privacyOptionsRequired: Boolean,
-)
+    /**
+     * Whether an ad may be requested. False until the consent+init round trip finishes — on a
+     * real device that took seven seconds, so a player who fails fast can reach the fail screen
+     * before this flips. It lives in [PlayState], not a bare property read once at composition,
+     * so the banner appears the instant readiness changes rather than being stuck at whatever it
+     * was the moment Screen.Fail first composed.
+     */
+    val adsEnabled: Boolean,
+
+    // ---- daily trial -------------------------------------------------------------------------
+    val mode: Mode,
+    /** Which of [DailyTrial.RINGS] is armed or running. Meaningless outside [Mode.Daily]. */
+    val dailyRingIndex: Int,
+    /** One entry per finished ring of the trial in progress, in ring order. */
+    val dailyMarks: List<Boolean>,
+    /** Signed errors of the trial's rings that actually produced a release. */
+    val dailyErrorsMs: List<Float>,
+    /** The last trial this device finished, on any day. */
+    val dailyResult: DailyResult?,
+    /** True once today's trial is spent. One attempt per day is the whole point. */
+    val dailyPlayedToday: Boolean,
+    val dailyDayStreak: Int,
+    val dailyBestHits: Int,
+
+    /** Fastest reflex-test reaction ever recorded, in ms. 0 means never played. */
+    val twitchBestMs: Int,
+) {
+    /** Hits so far in the trial in progress. The numeral on the play surface in [Mode.Daily]. */
+    val dailyHits: Int get() = dailyMarks.count { it }
+}
 
 sealed interface GameEvent {
     data class Perfect(val streak: Int) : GameEvent
@@ -88,6 +127,11 @@ class GameViewModel(
     private val nowEpochMs: () -> Long = { System.currentTimeMillis() },
     private val adHost: AdHost = AdHost.None,
     private val adSession: AdSession = AdSession(nowEpochMs),
+    /**
+     * Today's date as a day number. Injected for the same reason [nowEpochMs] is: it is calendar
+     * bookkeeping, never timing, and a test must be able to cross midnight on demand.
+     */
+    private val todayEpochDay: () -> Long = { LocalDate.now().toEpochDay() },
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
@@ -112,6 +156,16 @@ class GameViewModel(
             unlockedPaletteIds = emptySet(),
             lifetimeRuns = 0,
             privacyOptionsRequired = false,
+            adsEnabled = false,
+            mode = Mode.Endless,
+            dailyRingIndex = 0,
+            dailyMarks = emptyList(),
+            dailyErrorsMs = emptyList(),
+            dailyResult = null,
+            dailyPlayedToday = false,
+            dailyDayStreak = 0,
+            dailyBestHits = 0,
+            twitchBestMs = 0,
         )
     )
     val state: StateFlow<PlayState> = _state.asStateFlow()
@@ -122,6 +176,16 @@ class GameViewModel(
     private var roundClock: RoundClock? = null
     private var runInProgress = false
     private var bestAtRunStart = 0
+
+    /**
+     * The ten rounds of the trial in progress, and the day they belong to.
+     *
+     * They live here rather than in [PlayState] because they are fixed for the whole trial: putting
+     * ten [RoundPlan]s in a state object that is copied on every judgement would copy them all every
+     * time for nothing.
+     */
+    private var dailyPlans: List<RoundPlan> = emptyList()
+    private var dailyEpochDay = 0L
 
     init {
         viewModelScope.launch {
@@ -144,6 +208,25 @@ class GameViewModel(
         }
         viewModelScope.launch {
             store.lifetimeRuns.collect { runs -> _state.update { it.copy(lifetimeRuns = runs) } }
+        }
+        viewModelScope.launch {
+            store.lastDailyResult.collect { result ->
+                _state.update {
+                    it.copy(
+                        dailyResult = result,
+                        dailyPlayedToday = result != null && result.epochDay == todayEpochDay(),
+                    )
+                }
+            }
+        }
+        viewModelScope.launch {
+            store.dailyDayStreak.collect { days -> _state.update { it.copy(dailyDayStreak = days) } }
+        }
+        viewModelScope.launch {
+            store.dailyBestHits.collect { hits -> _state.update { it.copy(dailyBestHits = hits) } }
+        }
+        viewModelScope.launch {
+            store.twitchBestMs.collect { ms -> _state.update { it.copy(twitchBestMs = ms) } }
         }
         viewModelScope.launch { store.recordFirstLaunch(nowEpochMs()) }
     }
@@ -170,6 +253,23 @@ class GameViewModel(
         roundClock = null
 
         if (release.verdict == Verdict.PERFECT) {
+            // A daily hit does not touch the best streak or the title ladder: the trial is a
+            // separate contest against a fixed set of ten rings, and letting it feed the endless
+            // ladder would make the ladder mean two different things.
+            if (current.mode == Mode.Daily) {
+                _state.value = current.copy(
+                    phase = Phase.Perfect,
+                    lastRelease = release,
+                    deadRadiusDp = release.radiusAtReleaseDp,
+                    perfectAtUptimeMs = upUptimeMs,
+                    armedAtUptimeMs = upUptimeMs + FLASH_MS + QUIET_MS,
+                    dailyMarks = current.dailyMarks + true,
+                    dailyErrorsMs = current.dailyErrorsMs + release.errorMs,
+                )
+                _events.tryEmit(GameEvent.Perfect(current.dailyHits + 1))
+                return
+            }
+
             val streak = current.streak + 1
             _state.value = current.copy(
                 phase = Phase.Perfect,
@@ -185,7 +285,7 @@ class GameViewModel(
             }
             _events.tryEmit(GameEvent.Perfect(streak))
         } else {
-            fail(current, release.radiusAtReleaseDp, release)
+            fail(current, release.radiusAtReleaseDp, release, upUptimeMs)
         }
     }
 
@@ -212,10 +312,18 @@ class GameViewModel(
                 val clock = roundClock ?: return
                 if (clock.hasOvershotAt(nowUptimeMs)) {
                     roundClock = null
-                    fail(current, clock.radiusDpAt(nowUptimeMs), release = null)
+                    fail(current, clock.radiusDpAt(nowUptimeMs), release = null, atUptimeMs = nowUptimeMs)
                 }
             }
-            Phase.Perfect -> if (nowUptimeMs >= current.armedAtUptimeMs) armNextRound(current.streak)
+            Phase.Perfect -> if (nowUptimeMs >= current.armedAtUptimeMs) {
+                if (current.mode == Mode.Daily) advanceDaily(current) else armNextRound(current.streak)
+            }
+            // A missed ring in a trial is a beat, not an ending: the dead ring stands for
+            // DAILY_MISS_DWELL_MS and then the next ring arms itself. Endless mode never advances
+            // from Failed — there the fail screen is the destination.
+            Phase.Failed -> if (current.mode == Mode.Daily && nowUptimeMs >= current.armedAtUptimeMs) {
+                advanceDaily(current)
+            }
             else -> Unit
         }
     }
@@ -232,6 +340,9 @@ class GameViewModel(
         _state.update {
             it.copy(
                 phase = Phase.Idle,
+                // Endless is the surface's resting state. Anything that starts a fresh run is
+                // leaving the trial by definition, so this can never strand the surface in Daily.
+                mode = Mode.Endless,
                 streak = 0,
                 roundId = it.roundId + 1,
                 plan = Difficulty.planRound(streak = 0, seed = random.nextLong()),
@@ -271,15 +382,35 @@ class GameViewModel(
                 val floor = current.plan.targetRadiusDp - current.plan.overshootFailDp
                 clock.radiusDpAt(nowUptimeMs).coerceAtLeast(floor)
             }
-            Phase.Perfect, Phase.Failed, Phase.ContinueOffer, Phase.Results -> current.deadRadiusDp
+            Phase.Perfect, Phase.Failed, Phase.ContinueOffer, Phase.Results, Phase.DailyDone ->
+                current.deadRadiusDp
         }
     }
 
-    private fun fail(current: PlayState, deadRadiusDp: Float, release: Release?) {
+    private fun fail(current: PlayState, deadRadiusDp: Float, release: Release?, atUptimeMs: Long) {
+        // A trial ring is scored and moved past. No continue offer — a rewarded second chance would
+        // make one player's ten rings a different contest from everyone else's, which is the one
+        // thing a shared daily seed cannot survive.
+        if (current.mode == Mode.Daily) {
+            _state.value = current.copy(
+                phase = Phase.Failed,
+                lastRelease = release,
+                deadRadiusDp = deadRadiusDp,
+                dailyMarks = current.dailyMarks + false,
+                dailyErrorsMs = if (release == null) {
+                    current.dailyErrorsMs
+                } else {
+                    current.dailyErrorsMs + release.errorMs
+                },
+                armedAtUptimeMs = atUptimeMs + DAILY_MISS_DWELL_MS,
+            )
+            _events.tryEmit(GameEvent.Fail(current.dailyHits))
+            return
+        }
+
         val offerContinue = adHost.isRewardedReady(RewardedSurface.CONTINUE) &&
             shouldOfferContinue(
                 streak = current.streak,
-                bestStreak = current.best,
                 continuesUsedThisRun = current.continuesUsedThisRun,
                 bestAtRunStart = bestAtRunStart,
             )
@@ -358,9 +489,6 @@ class GameViewModel(
         adHost.showInterstitial(onFinished)
     }
 
-    /** Whether an ad may be requested at all. The banner asks before it exists. */
-    val adsEnabled: Boolean get() = adHost.adsEnabled
-
     fun attachAdActivity(activity: android.app.Activity?) = adHost.attachActivity(activity)
 
     private val _adStartupDone = MutableStateFlow(false)
@@ -381,7 +509,7 @@ class GameViewModel(
             // Asked once, here: UMP has nothing to say before the consent round trip has run, and
             // the answer cannot change again inside a session.
             val required = runCatching { adHost.isPrivacyOptionsRequired() }.getOrDefault(false)
-            _state.update { it.copy(privacyOptionsRequired = required) }
+            _state.update { it.copy(privacyOptionsRequired = required, adsEnabled = adHost.adsEnabled) }
             _adStartupDone.value = true
         }
     }
@@ -419,6 +547,143 @@ class GameViewModel(
         }
     }
 
+    // ---- daily trial -----------------------------------------------------------------------
+
+    /**
+     * Arms today's trial at ring one. Refuses if today's attempt is already spent — one attempt per
+     * day is not a soft rule, it is what makes a shared result worth sharing.
+     *
+     * Returns whether the trial actually started, so the caller does not navigate into a screen the
+     * player is not allowed to be on.
+     */
+    fun startDailyTrial(): Boolean {
+        val today = todayEpochDay()
+        if (_state.value.dailyResult?.epochDay == today) return false
+
+        dailyEpochDay = today
+        dailyPlans = DailyTrial.plansFor(today)
+        roundClock = null
+        runInProgress = false
+        _state.update {
+            it.copy(
+                phase = Phase.Idle,
+                mode = Mode.Daily,
+                streak = 0,
+                roundId = it.roundId + 1,
+                plan = dailyPlans.first(),
+                roundStartUptimeMs = 0L,
+                lastRelease = null,
+                deadRadiusDp = Difficulty.START_RADIUS_DP,
+                perfectAtUptimeMs = 0L,
+                armedAtUptimeMs = 0L,
+                newlyUnlockedTitles = emptyList(),
+                continuesUsedThisRun = 0,
+                dailyRingIndex = 0,
+                dailyMarks = emptyList(),
+                dailyErrorsMs = emptyList(),
+            )
+        }
+        return true
+    }
+
+    /** Leaves the trial and puts the surface back in endless mode, armed and waiting. */
+    fun leaveDailyTrial() {
+        _state.update { it.copy(mode = Mode.Endless) }
+        startNewRun()
+    }
+
+    /**
+     * Walking out of a trial part-way forfeits the rings that were not played — they are recorded as
+     * misses and today's attempt is spent.
+     *
+     * The alternative is a back press that silently costs nothing, which turns one attempt a day
+     * into unlimited attempts for anyone who notices. A trial abandoned before its first ring is
+     * simply not started, so this cannot manufacture a zero out of an accidental tap.
+     */
+    fun abandonDailyTrial() {
+        val current = _state.value
+        if (current.mode != Mode.Daily || current.phase == Phase.DailyDone) return
+
+        if (current.dailyMarks.isNotEmpty()) {
+            val forfeited = DailyResult(
+                epochDay = dailyEpochDay,
+                marks = current.dailyMarks + List(DailyTrial.RINGS - current.dailyMarks.size) { false },
+                meanAbsErrorMs = DailyTrial.meanAbsErrorMs(current.dailyErrorsMs),
+            )
+            // Into state first, for the same reason advanceDaily does: Home reads dailyPlayedToday
+            // the moment this returns, and must not offer a run that startDailyTrial would refuse.
+            _state.update { it.copy(dailyResult = forfeited, dailyPlayedToday = true) }
+            viewModelScope.launch { store.recordDailyResult(forfeited) }
+        }
+        leaveDailyTrial()
+    }
+
+    /**
+     * The ring just scored is behind us. Either arm the next one, or the trial is over and the
+     * result is written — once, here, which is the only place a daily result is ever persisted.
+     */
+    private fun advanceDaily(current: PlayState) {
+        val nextIndex = current.dailyRingIndex + 1
+        roundClock = null
+
+        if (nextIndex >= DailyTrial.RINGS) {
+            val result = DailyResult(
+                epochDay = dailyEpochDay,
+                marks = current.dailyMarks,
+                meanAbsErrorMs = DailyTrial.meanAbsErrorMs(current.dailyErrorsMs),
+            )
+            // The result goes into state in the SAME breath as the phase, not when the store echoes
+            // it back. The result screen composes the instant the phase flips, and on a first-ever
+            // trial the stored value is still null at that moment — it would have read "no result"
+            // and bounced the player home a frame after they finished.
+            _state.value = current.copy(
+                phase = Phase.DailyDone,
+                dailyRingIndex = nextIndex,
+                dailyResult = result,
+                dailyPlayedToday = true,
+            )
+            viewModelScope.launch { store.recordDailyResult(result) }
+            return
+        }
+
+        _state.value = current.copy(
+            phase = Phase.Idle,
+            roundId = current.roundId + 1,
+            dailyRingIndex = nextIndex,
+            plan = dailyPlans[nextIndex],
+            roundStartUptimeMs = 0L,
+            lastRelease = null,
+            deadRadiusDp = Difficulty.START_RADIUS_DP,
+            perfectAtUptimeMs = 0L,
+            armedAtUptimeMs = 0L,
+        )
+    }
+
+    /**
+     * One reflex-test reaction. A guess below the human floor is discarded rather than recorded as a
+     * record no one could ever beat honestly.
+     */
+    fun recordTwitchReaction(reactionMs: Long) {
+        if (!Twitch.isRecordable(reactionMs)) return
+        viewModelScope.launch { store.recordTwitchReaction(reactionMs.toInt()) }
+    }
+
+    /**
+     * A finished reflex sitting — five attempts, summary on screen. The second interstitial site in
+     * the app, and a natural break by construction: the test is over and nothing is in flight.
+     *
+     * It answers to the SAME gate the round card uses, so the whole app shares one cadence and a
+     * player bouncing between the two modes cannot be shown more ads than either alone would allow.
+     * The decision lives here rather than in the screen: what the screen knows is that a sitting
+     * ended, not whether that is worth an ad.
+     */
+    fun onReflexSittingCompleted() {
+        adSession.onSideActivityEnded()
+        // Nothing about the reflex screen depends on the ad, so the callback is empty by design —
+        // the summary is already behind it and is still there when it is dismissed.
+        if (shouldShowInterstitialNow()) showInterstitial {}
+    }
+
     private fun armNextRound(streak: Int) {
         val current = _state.value
         _state.value = current.copy(
@@ -439,6 +704,12 @@ class GameViewModel(
 
         /** Nothing at all, after the flash, before the next round is armed. */
         const val QUIET_MS = 420L
+
+        /**
+         * How long a missed trial ring is left standing before the next one arms. Longer than the
+         * perfect flash: a miss needs a beat to register as a miss, or ten rings blur into one.
+         */
+        const val DAILY_MISS_DWELL_MS = 700L
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {

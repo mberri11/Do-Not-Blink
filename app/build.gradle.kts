@@ -18,6 +18,37 @@ val TEST_BANNER_UNIT = "ca-app-pub-3940256099942544/6300978111"
 val TEST_INTERSTITIAL_UNIT = "ca-app-pub-3940256099942544/1033173712"
 val TEST_REWARDED_UNIT = "ca-app-pub-3940256099942544/5224354917"
 
+/**
+ * An escape hatch for a release-style build (minified, signed) that must not show real ads —
+ * a review pipeline, a demo, a QA build. `-Pdnb.useTestAds=true`, or `dnb.useTestAds=true` in a
+ * gradle.properties. Release only: debug already always uses the test constants unconditionally,
+ * and this property has no effect there. Default false leaves Stage 6's behaviour untouched.
+ */
+val useTestAds: Boolean =
+    providers.gradleProperty("dnb.useTestAds").getOrElse("false").toBoolean()
+
+/** Last 4 characters only — enough to eyeball which ID landed without printing the whole thing. */
+fun maskAdId(value: String): String = if (value.isEmpty()) "<empty>" else "…" + value.takeLast(4)
+
+logger.lifecycle(
+    "dnb.useTestAds=$useTestAds -> " +
+        if (useTestAds) "TEST ADS (Google demo IDs, verifyReleaseAdIds skipped)" else "REAL IDs (Stage 6, guarded)"
+)
+run {
+    val appIdForLog = if (useTestAds) TEST_APP_ID else adProperty("ADMOB_APP_ID")
+    val bannerForLog = if (useTestAds) TEST_BANNER_UNIT else adProperty("ADMOB_UNIT_BANNER")
+    val interstitialForLog = if (useTestAds) TEST_INTERSTITIAL_UNIT else adProperty("ADMOB_UNIT_INTERSTITIAL")
+    val rewardedContinueForLog = if (useTestAds) TEST_REWARDED_UNIT else adProperty("ADMOB_UNIT_REWARDED_CONTINUE")
+    val rewardedPhosphorForLog = if (useTestAds) TEST_REWARDED_UNIT else adProperty("ADMOB_UNIT_REWARDED_PHOSPHOR")
+    val rewardedTitlesForLog = if (useTestAds) TEST_REWARDED_UNIT else adProperty("ADMOB_UNIT_REWARDED_TITLES")
+    logger.lifecycle("  APP_ID (dnb_app_id)                   = ${maskAdId(appIdForLog)}")
+    logger.lifecycle("  BANNER (dnb_banner_fail)               = ${maskAdId(bannerForLog)}")
+    logger.lifecycle("  INTERSTITIAL (dnb_interstitial_round)  = ${maskAdId(interstitialForLog)}")
+    logger.lifecycle("  REWARDED_CONTINUE (dnb_rewarded_continue) = ${maskAdId(rewardedContinueForLog)}")
+    logger.lifecycle("  REWARDED_PHOSPHOR (dnb_rewarded_phosphor) = ${maskAdId(rewardedPhosphorForLog)}")
+    logger.lifecycle("  REWARDED_TITLES (dnb_rewarded_titles)  = ${maskAdId(rewardedTitlesForLog)}")
+}
+
 /** A typo in a pasted ID is the commonest way an indie release ships with no fill at all. */
 val APP_ID_SHAPE = Regex("""^ca-app-pub-\d{16}~\d{10}$""")
 val UNIT_ID_SHAPE = Regex("""^ca-app-pub-\d{16}/\d{10}$""")
@@ -73,8 +104,8 @@ android {
         applicationId = "com.simobr.donotblink"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 4
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -116,22 +147,41 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+            // The .so files here are AndroidX's own (Compose's graphics.path, DataStore's shared
+            // counter) — nothing this app or the ad SDK ships. SYMBOL_TABLE has AGP bundle their
+            // symbol tables straight into the AAB, so Play extracts them on upload: readable
+            // native crash stacks in Android vitals, no separate manual upload ever needed.
+            ndk {
+                debugSymbolLevel = "SYMBOL_TABLE"
+            }
             if (missingSigningProperties.isEmpty()) {
                 signingConfig = signingConfigs.getByName("release")
             }
 
-            val appId = adProperty("ADMOB_APP_ID")
-            // NOT `.ifEmpty { TEST_APP_ID }`. A forgotten local.properties used to produce a
-            // perfectly valid, uploadable AAB carrying Google's public test App ID — an
-            // invalid-traffic incident waiting to happen. The placeholder below is deliberately
-            // not an ad ID at all, and `verifyReleaseAdIds` blocks packaging long before it could
-            // reach a device.
-            manifestPlaceholders["admobAppId"] = appId.ifEmpty { "ADMOB_APP_ID_MISSING" }
-            buildConfigField("String", "AD_UNIT_BANNER", "\"${adProperty("ADMOB_UNIT_BANNER")}\"")
-            buildConfigField("String", "AD_UNIT_INTERSTITIAL", "\"${adProperty("ADMOB_UNIT_INTERSTITIAL")}\"")
-            buildConfigField("String", "AD_UNIT_REWARDED_CONTINUE", "\"${adProperty("ADMOB_UNIT_REWARDED_CONTINUE")}\"")
-            buildConfigField("String", "AD_UNIT_REWARDED_PHOSPHOR", "\"${adProperty("ADMOB_UNIT_REWARDED_PHOSPHOR")}\"")
-            buildConfigField("String", "AD_UNIT_REWARDED_TITLES", "\"${adProperty("ADMOB_UNIT_REWARDED_TITLES")}\"")
+            if (useTestAds) {
+                // Deliberate: Google's own demo IDs, the same ones the debug build type always
+                // carries. verifyReleaseAdIds is skipped below to match — it exists to catch an
+                // ACCIDENTAL test ID, not this intentional one.
+                manifestPlaceholders["admobAppId"] = TEST_APP_ID
+                buildConfigField("String", "AD_UNIT_BANNER", "\"$TEST_BANNER_UNIT\"")
+                buildConfigField("String", "AD_UNIT_INTERSTITIAL", "\"$TEST_INTERSTITIAL_UNIT\"")
+                buildConfigField("String", "AD_UNIT_REWARDED_CONTINUE", "\"$TEST_REWARDED_UNIT\"")
+                buildConfigField("String", "AD_UNIT_REWARDED_PHOSPHOR", "\"$TEST_REWARDED_UNIT\"")
+                buildConfigField("String", "AD_UNIT_REWARDED_TITLES", "\"$TEST_REWARDED_UNIT\"")
+            } else {
+                val appId = adProperty("ADMOB_APP_ID")
+                // NOT `.ifEmpty { TEST_APP_ID }`. A forgotten local.properties used to produce a
+                // perfectly valid, uploadable AAB carrying Google's public test App ID — an
+                // invalid-traffic incident waiting to happen. The placeholder below is deliberately
+                // not an ad ID at all, and `verifyReleaseAdIds` blocks packaging long before it could
+                // reach a device.
+                manifestPlaceholders["admobAppId"] = appId.ifEmpty { "ADMOB_APP_ID_MISSING" }
+                buildConfigField("String", "AD_UNIT_BANNER", "\"${adProperty("ADMOB_UNIT_BANNER")}\"")
+                buildConfigField("String", "AD_UNIT_INTERSTITIAL", "\"${adProperty("ADMOB_UNIT_INTERSTITIAL")}\"")
+                buildConfigField("String", "AD_UNIT_REWARDED_CONTINUE", "\"${adProperty("ADMOB_UNIT_REWARDED_CONTINUE")}\"")
+                buildConfigField("String", "AD_UNIT_REWARDED_PHOSPHOR", "\"${adProperty("ADMOB_UNIT_REWARDED_PHOSPHOR")}\"")
+                buildConfigField("String", "AD_UNIT_REWARDED_TITLES", "\"${adProperty("ADMOB_UNIT_REWARDED_TITLES")}\"")
+            }
         }
     }
 
@@ -163,6 +213,13 @@ val verifyReleaseAdIds = tasks.register("verifyReleaseAdIds") {
     group = "verification"
     description = "Fails the release build unless every AdMob ID is present, well-formed and not a test ID."
     doLast {
+        if (useTestAds) {
+            // Intentional test ads (dnb.useTestAds=true): the whole point of this task is to catch
+            // an ACCIDENTAL test ID reaching a real release, which does not apply here.
+            logger.lifecycle("verifyReleaseAdIds: skipped — dnb.useTestAds=true")
+            return@doLast
+        }
+
         val problems = mutableListOf<String>()
 
         val appId = adProperty("ADMOB_APP_ID")
@@ -244,6 +301,11 @@ dependencies {
 
     implementation(libs.play.services.ads)
     implementation(libs.user.messaging.platform)
+
+    // Not used directly: play-services-basement:18.9.0 transitively pulls in
+    // androidx.fragment:fragment:1.1.0, which Play's SDK Index flags as outdated. Declaring a
+    // current version here wins Gradle's conflict resolution over that transitive pin.
+    implementation(libs.androidx.fragment.ktx)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

@@ -39,6 +39,8 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.simobr.donotblink.ads.AdaptiveAnchoredBanner
 import com.simobr.donotblink.ads.rememberBannerSlotHeight
+import com.simobr.donotblink.game.Readout
+import com.simobr.donotblink.game.Release
 import com.simobr.donotblink.game.Title
 import com.simobr.donotblink.ui.common.noRippleClickable
 import com.simobr.donotblink.ui.theme.DnbColor
@@ -59,6 +61,7 @@ object FailTags {
     const val STREAK = "fail-streak"
     const val BANNER = "fail-banner"
     const val UNLOCKED = "fail-unlocked"
+    const val READOUT = "fail-readout"
 }
 
 /**
@@ -76,7 +79,20 @@ internal val BestLineStyle = DnbType.microLabel.copy(
 internal val HomeLinkStyle = DnbType.microLabel.copy(letterSpacing = 0.3.em, color = DnbColor.LabelMid)
 private val UnlockedThresholdStyle = DnbType.microLabel.copy(fontSize = 10.sp, letterSpacing = 0.16.em)
 
+/**
+ * The miss readout. Deliberately quieter than "blinked." above it and the streak below it — it is
+ * the line a player who wants to improve goes looking for, not the headline.
+ */
+internal val ReadoutStyle = DnbType.microLabel.copy(
+    fontSize = 10.sp,
+    letterSpacing = 0.3.em,
+    color = DnbColor.LabelMid,
+)
+
 private const val BLINKED_TOP_DP = 104f
+
+/** "blinked." is 17sp; its box is ~24dp tall, and the readout sits 12dp under it. */
+private const val READOUT_TOP_DP = 140f
 private const val RING_CENTRE_Y_DP = 360f
 private const val STREAK_LABEL_TOP_DP = 300f
 private const val STREAK_NUMERAL_TOP_DP = 322f
@@ -122,6 +138,8 @@ fun FailScreen(
     onAgain: () -> Unit,
     onHome: () -> Unit,
     modifier: Modifier = Modifier,
+    /** The release that ended the run, or null when it ended by overshoot with no release at all. */
+    lastRelease: Release? = null,
     bannerEnabled: Boolean = false,
     bannerSlotHeight: Dp = rememberBannerSlotHeight(),
 ) {
@@ -166,6 +184,16 @@ fun FailScreen(
             text = "blinked.",
             style = DnbType.failLine.tinted(palette),
             modifier = Modifier.align(Alignment.TopCenter).padding(top = BLINKED_TOP_DP.scaled()),
+        )
+
+        // Which way you missed, and by how much. The game has always known this and never said it.
+        Text(
+            text = Readout.missLine(lastRelease),
+            style = ReadoutStyle,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .padding(top = READOUT_TOP_DP.scaled())
+                .testTag(FailTags.READOUT),
         )
 
         Text(

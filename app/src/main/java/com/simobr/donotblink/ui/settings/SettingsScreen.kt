@@ -29,7 +29,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.Dp
 import com.simobr.donotblink.BuildConfig
+import com.simobr.donotblink.ads.AdaptiveAnchoredBanner
+import com.simobr.donotblink.ads.rememberBannerSlotHeight
 import com.simobr.donotblink.ui.common.noRippleClickable
 import com.simobr.donotblink.ui.theme.DnbColor
 import com.simobr.donotblink.ui.theme.DnbDim
@@ -51,6 +54,7 @@ object SettingsTags {
     const val LICENCES = "settings-licences"
     const val HEADER = "settings-header"
     const val BUILD = "settings-build"
+    const val BANNER = "settings-banner"
 }
 
 /**
@@ -103,6 +107,13 @@ fun SettingsScreen(
     /** UMP's entry point exists only where UMP says it is required. See `showsPrivacyOptionsRow`. */
     showPrivacyOptions: Boolean = false,
     onOpenPrivacyOptions: () -> Unit = {},
+    /**
+     * The second banner surface in the app, added for v1.2.0 at Simo's request. SETTINGS is a menu,
+     * never mid-round, so the same "reserve the real height, always" rule the fail screen uses
+     * applies unchanged: nothing here may shift depending on whether an ad actually fills.
+     */
+    bannerEnabled: Boolean = false,
+    bannerSlotHeight: Dp = rememberBannerSlotHeight(),
 ) {
     val palette = LocalPalette.current
     BackHandler(onBack = onBack)
@@ -230,10 +241,26 @@ fun SettingsScreen(
             modifier = Modifier
                 .align(Alignment.BottomStart)
                 // No navigationBarsPadding: the root Box already consumed safeDrawing, and
-                // consuming the bottom inset twice double-pads it.
-                .padding(start = DnbDim.screenPadH, bottom = BUILD_BOTTOM_DP.scaled())
+                // consuming the bottom inset twice double-pads it. bannerSlotHeight is added on
+                // top of the original offset — reserved whether or not an ad ever fills, exactly
+                // like the fail screen's banner, so BUILD cannot end up sitting under it.
+                .padding(
+                    start = DnbDim.screenPadH,
+                    bottom = bannerSlotHeight + BUILD_BOTTOM_DP.scaled(),
+                )
                 .testTag(SettingsTags.BUILD),
         )
+
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(bannerSlotHeight)
+                .testTag(SettingsTags.BANNER),
+            contentAlignment = Alignment.Center,
+        ) {
+            AdaptiveAnchoredBanner(enabled = bannerEnabled)
+        }
     }
 }
 

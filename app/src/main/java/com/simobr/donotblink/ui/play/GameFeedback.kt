@@ -12,16 +12,32 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
+import com.simobr.donotblink.game.Twitch
 import kotlin.math.PI
 import kotlin.math.exp
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.sin
 
-/** Haptics and sound for the three moments the game has. */
+/** Haptics and sound for the moments the game has. */
 interface GameFeedback {
     fun perfect(haptics: Boolean, sound: Boolean)
     fun fail(haptics: Boolean, sound: Boolean)
+
+    /**
+     * The reflex test's reward, on the tap that catches the signal.
+     *
+     * Deliberately NOT played when the signal arrives. A sound or a buzz at that instant would give
+     * the player something to react to other than the ring, and reaction to a sound is roughly 40ms
+     * faster than to a shape — the reading would stop measuring what it claims to.
+     *
+     * [reactionMs] picks the pitch: the faster the catch, the brighter the chirp, so the sound says
+     * how good the reading was before the number has finished being read.
+     */
+    fun reflexHit(haptics: Boolean, sound: Boolean, reactionMs: Long)
+
+    /** The reflex test's correction, on a tap that came before the signal. */
+    fun reflexTooSoon(haptics: Boolean, sound: Boolean)
 
     /**
      * The hold hum, at [frequencyHz]. Called once per frame while the ring contracts; the first
@@ -39,6 +55,8 @@ interface GameFeedback {
         val None: GameFeedback = object : GameFeedback {
             override fun perfect(haptics: Boolean, sound: Boolean) = Unit
             override fun fail(haptics: Boolean, sound: Boolean) = Unit
+            override fun reflexHit(haptics: Boolean, sound: Boolean, reactionMs: Long) = Unit
+            override fun reflexTooSoon(haptics: Boolean, sound: Boolean) = Unit
             override fun hold(frequencyHz: Float) = Unit
             override fun stopHold() = Unit
             override fun release() = Unit
@@ -71,6 +89,16 @@ class AndroidGameFeedback(context: Context) : GameFeedback {
 
     private val perfectTone: AudioTrack? by lazy { buildTrack(perfectPcm()) }
     private val failTone: AudioTrack? by lazy { buildTrack(failPcm()) }
+
+    /**
+     * Three chirps rather than one synthesised per tap: an [AudioTrack] built on the tap would
+     * allocate and configure a hardware track in the same millisecond the player is being timed,
+     * which is exactly the wrong moment to do it on the low-end hardware this game targets.
+     */
+    private val reflexTones: List<AudioTrack?> by lazy {
+        REFLEX_CHIRP_BASE_HZ.map { buildTrack(reflexChirpPcm(it)) }
+    }
+    private val tooSoonTone: AudioTrack? by lazy { buildTrack(tooSoonPcm()) }
     private val hum = HoldHumVoice()
 
     override fun perfect(haptics: Boolean, sound: Boolean) {
@@ -87,6 +115,22 @@ class AndroidGameFeedback(context: Context) : GameFeedback {
         if (sound) play(failTone)
     }
 
+    override fun reflexHit(haptics: Boolean, sound: Boolean, reactionMs: Long) {
+        // A heavier click than the ring game's tick. Catching the signal is a single decisive
+        // event, where a perfect release is the end of a held breath.
+        if (haptics) vibrate(predefined = VibrationEffect.EFFECT_HEAVY_CLICK) {
+            VibrationEffect.createOneShot(18L, VibrationEffect.DEFAULT_AMPLITUDE)
+        }
+        if (sound) play(reflexTones.getOrNull(Twitch.chirpTier(reactionMs)))
+    }
+
+    override fun reflexTooSoon(haptics: Boolean, sound: Boolean) {
+        if (haptics) vibrate(predefined = VibrationEffect.EFFECT_DOUBLE_CLICK) {
+            VibrationEffect.createWaveform(longArrayOf(0L, 14L, 40L, 14L), -1)
+        }
+        if (sound) play(tooSoonTone)
+    }
+
     override fun hold(frequencyHz: Float) = hum.hold(frequencyHz)
 
     override fun stopHold() = hum.stop()
@@ -97,6 +141,8 @@ class AndroidGameFeedback(context: Context) : GameFeedback {
         hum.release()
         runCatching { perfectTone?.release() }
         runCatching { failTone?.release() }
+        reflexTones.forEach { tone -> runCatching { tone?.release() } }
+        runCatching { tooSoonTone?.release() }
     }
 
     private inline fun vibrate(predefined: Int, fallback: () -> VibrationEffect) {
@@ -144,6 +190,12 @@ class AndroidGameFeedback(context: Context) : GameFeedback {
     private companion object {
         const val SAMPLE_RATE_HZ = SampleRateHz
 
+        /**
+         * Chirp starting pitches, fastest tier first. Every one glides up an octave, so the whole
+         * family reads as the same sound played higher or lower rather than three different sounds.
+         */
+        val REFLEX_CHIRP_BASE_HZ = listOf(740.0, 587.0, 466.0)
+
         fun samples(ms: Int): Int = SAMPLE_RATE_HZ * ms / 1000
 
         /** 40ms of 880Hz sine, 4ms attack, 12ms decay. */
@@ -159,6 +211,59 @@ class AndroidGameFeedback(context: Context) : GameFeedback {
                     else -> 1.0
                 }
                 ((sin(2.0 * PI * 880.0 * seconds) * envelope * 0.6) * Short.MAX_VALUE).toInt().toShort()
+            }
+        }
+
+        /**
+         * 70ms chirp gliding up an octave from [startHz], with a second harmonic for brightness.
+         *
+         * It has to be recognisably NOT the ring game's perfect tone, which is a steady 880Hz sine.
+         * A glide is the cheapest way to be categorically different: the ear hears movement before
+         * it hears pitch, so this reads as a distinct event even at the same loudness. Phase is
+         * accumulated rather than computed from `sin(2*pi*f*t)` — with a changing f that formula
+         * sweeps the phase, not the frequency, and produces a chirp at roughly twice the intended
+         * rate.
+         */
+        fun reflexChirpPcm(startHz: Double): ShortArray {
+            val total = samples(70)
+            val attack = samples(2)
+            val decay = samples(26)
+            var phase = 0.0
+            return ShortArray(total) { i ->
+                val hz = startHz * (1.0 + i.toDouble() / total)
+                phase += 2.0 * PI * hz / SAMPLE_RATE_HZ
+                if (phase >= 2.0 * PI) phase -= 2.0 * PI
+                val envelope = when {
+                    i < attack -> i.toDouble() / attack
+                    i > total - decay -> (total - i).toDouble() / decay
+                    else -> 1.0
+                }
+                val wave = 0.78 * sin(phase) + 0.22 * sin(2.0 * phase)
+                ((wave * envelope * 0.5) * Short.MAX_VALUE).toInt().toShort()
+            }
+        }
+
+        /**
+         * 90ms blip gliding DOWN, the reward chirp's exact opposite.
+         *
+         * Tapping before the signal is a mistake, not a failure — it costs the attempt nothing — so
+         * it gets its own quiet correction rather than the ring game's 110Hz fail thud.
+         */
+        fun tooSoonPcm(): ShortArray {
+            val total = samples(90)
+            val attack = samples(2)
+            val decay = samples(34)
+            var phase = 0.0
+            return ShortArray(total) { i ->
+                val hz = 470.0 * (1.0 - 0.45 * i.toDouble() / total)
+                phase += 2.0 * PI * hz / SAMPLE_RATE_HZ
+                if (phase >= 2.0 * PI) phase -= 2.0 * PI
+                val envelope = when {
+                    i < attack -> i.toDouble() / attack
+                    i > total - decay -> (total - i).toDouble() / decay
+                    else -> 1.0
+                }
+                ((sin(phase) * envelope * 0.38) * Short.MAX_VALUE).toInt().toShort()
             }
         }
 

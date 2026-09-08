@@ -29,6 +29,21 @@
             android:value="${admobAppId}" />
 
         <!--
+          Grants a receiving app read access to ONE rendered share card in this app's own cache,
+          for the duration of the share. Not exported, no permission granted to anything else, and
+          share_paths.xml exposes a single cache subdirectory and nothing above it.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.shares"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/share_paths" />
+        </provider>
+
+        <!--
           No android:screenOrientation on purpose: API 36 ignores orientation locks on sw600dp
           displays, so declaring one is misleading. Portrait-first is a layout decision.
         -->
