@@ -9,3 +9,9 @@ local.properties
 # Design exports
 design/screens/
 design/Do Not Blink.html
+
+googleplay_screens/
+store/
+
+# Scratch listings
+tree.txt
